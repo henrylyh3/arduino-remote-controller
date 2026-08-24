@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local RF/IR Controller</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local RF/IR</p>
+        <h1>Smart-home controller</h1>
+      </div>
+      <div class="status">
+        <span id="apiStatus" class="pill">Loading</span>
+        <span id="clock" class="muted"></span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel main-panel">
+        <div class="section-head">
+          <h2>Signals</h2>
+          <button id="refreshButton" class="secondary" type="button">Refresh</button>
+        </div>
+        <div id="deviceGrid" class="device-grid"></div>
+      </section>
+
+      <aside class="side-stack">
+        <section class="panel">
+          <h2>Add node</h2>
+          <form id="nodeForm" class="form">
+            <label>
+              Name
+              <input name="name" required autocomplete="off" placeholder="Bedroom ESP32" />
+            </label>
+            <label>
+              Room
+              <input name="room" autocomplete="off" placeholder="Bedroom" />
+            </label>
+            <label>
+              Base URL
+              <input name="base_url" required autocomplete="off" placeholder="http://192.168.1.42" />
+            </label>
+            <button type="submit">Save node</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Learn signal</h2>
+          <form id="captureForm" class="form">
+            <label>
+              Name
+              <input name="name" required autocomplete="off" placeholder="Bedroom fan power" />
+            </label>
+            <label>
+              Node
+              <select name="node_id" id="captureNode" required></select>
+            </label>
+            <label>
+              Signal
+              <select name="signal_type" id="captureType" required>
+                <option value="rf">RF 433MHz</option>
+                <option value="ir">IR raw</option>
+              </select>
+            </label>
+            <label>
+              Timeout seconds
+              <input name="timeout" type="number" min="1" max="30" value="8" />
+            </label>
+            <button type="submit">Capture and save</button>
+          </form>
+        </section>
+      </aside>
+
+      <section class="panel">
+        <h2>Timers</h2>
+        <form id="timerForm" class="inline-form">
+          <select name="button_id" id="timerButton" required></select>
+          <input name="name" autocomplete="off" placeholder="Sleep timer" />
+          <input name="seconds" type="number" min="1" max="604800" value="1800" required />
+          <button type="submit">Start</button>
+        </form>
+        <div id="timerList" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Active jobs</h2>
+        <div id="activeJobList" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <h2>Workflows</h2>
+          <button id="addWorkflowStep" class="secondary" type="button">Add step</button>
+        </div>
+        <form id="workflowForm" class="form">
+          <label>
+            Name
+            <input name="name" autocomplete="off" placeholder="Night routine" />
+          </label>
+          <div id="workflowSteps" class="workflow-steps"></div>
+          <div class="workflow-actions">
+            <button id="saveWorkflowButton" type="submit">Save workflow</button>
+            <button id="cancelWorkflowEdit" class="secondary" type="button" hidden>Cancel edit</button>
+          </div>
+        </form>
+        <div id="workflowList" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Workflow schedules</h2>
+        <form id="workflowScheduleForm" class="schedule-form">
+          <select name="workflow_id" id="workflowScheduleWorkflow" required></select>
+          <input name="name" autocomplete="off" placeholder="Weekday night routine" />
+          <input name="time_of_day" type="time" required />
+          <fieldset>
+            <label><input type="checkbox" name="days" value="0" checked /> Mon</label>
+            <label><input type="checkbox" name="days" value="1" checked /> Tue</label>
+            <label><input type="checkbox" name="days" value="2" checked /> Wed</label>
+            <label><input type="checkbox" name="days" value="3" checked /> Thu</label>
+            <label><input type="checkbox" name="days" value="4" checked /> Fri</label>
+            <label><input type="checkbox" name="days" value="5" /> Sat</label>
+            <label><input type="checkbox" name="days" value="6" /> Sun</label>
+          </fieldset>
+          <button type="submit">Save</button>
+        </form>
+        <div id="workflowScheduleList" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Schedules</h2>
+        <form id="scheduleForm" class="schedule-form">
+          <select name="button_id" id="scheduleButton" required></select>
+          <input name="name" autocomplete="off" placeholder="Night cooling" />
+          <input name="time_of_day" type="time" required />
+          <fieldset>
+            <label><input type="checkbox" name="days" value="0" checked /> Mon</label>
+            <label><input type="checkbox" name="days" value="1" checked /> Tue</label>
+            <label><input type="checkbox" name="days" value="2" checked /> Wed</label>
+            <label><input type="checkbox" name="days" value="3" checked /> Thu</label>
+            <label><input type="checkbox" name="days" value="4" checked /> Fri</label>
+            <label><input type="checkbox" name="days" value="5" /> Sat</label>
+            <label><input type="checkbox" name="days" value="6" /> Sun</label>
+          </fieldset>
+          <button type="submit">Save</button>
+        </form>
+        <div id="scheduleList" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Event log</h2>
+        <div id="eventList" class="list"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" hidden></div>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
