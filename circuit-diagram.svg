@@ -24,10 +24,10 @@
 
   <rect class="bg" x="0" y="0" width="1280" height="900"/>
   <text class="label" x="48" y="52">ESP32 RF + IR Room Node</text>
-  <text class="small" x="48" y="84">Recommended wiring for RF fan control, IR learning, and stronger 2m+ IR transmit using 2N3904.</text>
+  <text class="small" x="48" y="84">Selected setup: Type-C ESP32, SYN115/SYN480R RF pair, HX1838 IR receiver, 5mm 940nm IR LED, and 2N3904 driver.</text>
 
   <rect class="box" x="80" y="160" width="310" height="570"/>
-  <text class="label" x="145" y="205">ESP32 DevKit</text>
+  <text class="label" x="145" y="205">Type-C ESP32 DevKit</text>
   <text class="tiny" x="145" y="230">ESP-WROOM-32, 30-pin</text>
 
   <rect class="pin" x="120" y="270" width="120" height="34"/>
@@ -45,47 +45,32 @@
   <rect class="pin" x="120" y="606" width="120" height="34"/>
   <text class="net" x="143" y="629">GPIO14</text>
 
-  <text class="tiny" x="258" y="293">Power for RF TX / LED driver</text>
-  <text class="tiny" x="258" y="349">IR receiver VCC</text>
+  <text class="tiny" x="258" y="293">Power for IR LED driver</text>
+  <text class="tiny" x="258" y="349">RF TX/RX and IR receiver VCC</text>
   <text class="tiny" x="258" y="405">Shared ground</text>
   <text class="tiny" x="258" y="461">RF transmitter DATA</text>
-  <text class="tiny" x="258" y="517">RF receiver DATA via divider</text>
+  <text class="tiny" x="258" y="517">RF receiver DATA</text>
   <text class="tiny" x="258" y="573">IR TX drive</text>
   <text class="tiny" x="258" y="629">IR receiver OUT</text>
 
   <rect class="module" x="770" y="135" width="330" height="155"/>
-  <text class="label" x="835" y="175">433 MHz RF TX</text>
-  <text class="small" x="815" y="212">VCC -> 5V/VIN</text>
+  <text class="label" x="835" y="175">SYN115 RF TX</text>
+  <text class="small" x="815" y="212">VCC -> 3V3</text>
   <text class="small" x="815" y="240">GND -> GND</text>
   <text class="small" x="815" y="268">DATA -> GPIO26</text>
-  <path class="wire-red" d="M240 287 C520 287 520 190 770 190"/>
+  <path class="wire-red" d="M240 343 C520 343 520 190 770 190"/>
   <path class="wire-gray" d="M240 399 C520 399 520 235 770 235"/>
   <path class="wire-green" d="M240 455 C520 455 520 263 770 263"/>
-  <line class="wire" x1="1100" y1="170" x2="1160" y2="110"/>
-  <text class="tiny" x="1136" y="105">Optional 17.3 cm antenna</text>
-
   <rect class="module" x="770" y="345" width="330" height="175"/>
-  <text class="label" x="835" y="385">433 MHz RF RX</text>
-  <text class="small" x="815" y="422">VCC -> 5V</text>
+  <text class="label" x="825" y="385">SYN480R RF RX</text>
+  <text class="small" x="815" y="422">VCC -> 3V3</text>
   <text class="small" x="815" y="450">GND -> GND</text>
-  <text class="small" x="815" y="478">DATA -> voltage divider -> GPIO27</text>
-  <path class="wire-red" d="M240 287 C570 287 570 420 770 420"/>
+  <text class="small" x="815" y="478">DATA -> GPIO27</text>
+  <path class="wire-red" d="M240 343 C570 343 570 420 770 420"/>
   <path class="wire-gray" d="M240 399 C570 399 570 448 770 448"/>
-  <path class="wire-blue" d="M770 476 L690 476"/>
-  <rect x="625" y="463" width="60" height="26" fill="#ffffff" stroke="#1f2937" stroke-width="2"/>
-  <text class="tiny" x="638" y="482">10k</text>
-  <circle cx="600" cy="476" r="6" fill="#111827"/>
-  <path class="wire-blue" d="M625 476 L600 476 C520 476 520 511 240 511"/>
-  <path class="wire-gray" d="M600 476 L600 540"/>
-  <rect x="587" y="540" width="26" height="62" fill="#ffffff" stroke="#1f2937" stroke-width="2"/>
-  <text class="tiny" x="572" y="632">20k or 22k</text>
-  <path class="wire-gray" d="M600 602 C520 602 520 399 240 399"/>
-  <text class="tiny" x="610" y="456">divider protects ESP32 GPIO27</text>
-  <line class="wire" x1="1100" y1="375" x2="1160" y2="315"/>
-  <text class="tiny" x="1136" y="310">Optional 17.3 cm antenna</text>
-
+  <path class="wire-blue" d="M770 476 C570 476 570 511 240 511"/>
   <rect class="module" x="770" y="590" width="330" height="155"/>
-  <text class="label" x="850" y="630">IR Receiver</text>
+  <text class="label" x="832" y="630">HX1838 IR Receiver</text>
   <text class="small" x="815" y="667">VCC -> 3V3</text>
   <text class="small" x="815" y="695">GND -> GND</text>
   <text class="small" x="815" y="723">OUT -> GPIO14</text>
@@ -116,8 +101,8 @@
   <text class="tiny" x="592" y="724">COLLECTOR</text>
 
   <rect class="warn" x="80" y="765" width="310" height="78"/>
-  <text class="small" x="105" y="797">ESP32 GPIO is not 5V tolerant.</text>
-  <text class="tiny" x="105" y="824">Use the RF RX divider when RF DATA may be 5V.</text>
+  <text class="small" x="105" y="797">Power RF TX/RX from 3V3.</text>
+  <text class="tiny" x="105" y="824">No RF divider needed with this wiring.</text>
 
   <rect class="box" x="770" y="785" width="330" height="55"/>
   <text class="tiny" x="795" y="817">All modules must share ESP32 GND.</text>

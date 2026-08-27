@@ -21,35 +21,74 @@ This starter uses HTTP between the laptop and ESP32 nodes. MQTT can be added lat
 
 Buy one set per room node.
 
-Confirmed purchases from 24 Aug 2026:
+Selected hardware list:
 
-| Ingredient | Shopee link | Confirmed item / variation | Use in this project | Status / note |
+| Ingredient | Shopee link | Confirmed item / variation | Use in this project | Status |
 | --- | --- | --- | --- | --- |
-| ESP32 DevKit | [ESP32 30 Pin ESP-WROOM-32 Wi-Fi Bluetooth Development Board](https://my.shp.ee/RNU8PSQR) | Type-C ESP32-WROOM-32, 30-pin | Main room node controller. Runs Wi-Fi, HTTP API, RF send/capture, and IR send/capture firmware. | Confirmed purchase. CH340C, CP2102, or CH9102 USB chip is OK. |
-| 433 MHz RF transmitter + receiver | [433MHz Transmitter Receiver RF Module](https://my.shp.ee/NQVLyfFR) | TX + RX pair | RF TX sends Fanzo/RF fan commands. RF RX captures/learns the original remote signal. | Confirmed purchase. |
-| NPN transistor | [Transistor 2N Series](https://my.shp.ee/Lde77knv) | 2N3904 | Drives the IR LED with more current than ESP32 GPIO can safely supply. Needed for stronger AC IR transmit range. | Confirmed purchase. Use 2N3904, not PNP parts such as 2N3906 or 2N2907. |
-| IR receiver + small IR transmitter module | [HX1838 Infrared IR Receiver Sensor And LED Transmitter Module](https://my.shp.ee/7tuaENzw) | HX1838 receiver + LED transmitter module | IR receiver learns/captures AC remote signals. Small transmitter module can be used for short-range testing. | Confirmed purchase. For final 2m+ transmit, use the separate 5 mm 940 nm IR LED plus 2N3904 circuit. |
-| IR emitter LED pack | [10pcs F3mm F5mm LED Infrared Emitting Diode](https://my.shp.ee/e6HjUNmi) | 5 mm IR emitter 940 nm | Final AC IR transmitter LED. Connect through 100 ohm resistor and 2N3904 transistor driver. | Confirmed purchase. Choose emitter, not receiver/photodiode/phototransistor. |
-| Resistors | Not purchased yet | 1k (GPIO4 to 2N3904 base), 100 ohm (IR LED current limit), 10k (RF receiver DATA divider top), 20k or 22k (RF receiver DATA divider bottom to GND) | Protects ESP32 GPIO and drives the IR LED circuit correctly. | Required. |
-| Jumper wires | Not purchased yet | Male-to-male and/or female-to-female wires | Temporary wiring between ESP32, modules, resistor divider, and IR driver. | Required for testing. |
-| Breadboard | Not purchased yet | Small solderless breadboard | Testing circuit before final build. | Required for easy setup/debug. |
+| ESP32 DevKit | [ESP32 30 Pin ESP-WROOM-32 Wi-Fi Bluetooth Development Board](https://my.shp.ee/RNU8PSQR) | Type-C ESP32-WROOM-32, 30-pin; CH340C, CP2102, or CH9102 USB chip is OK | Main room node controller. Runs Wi-Fi, HTTP API, RF send/capture, and IR send/capture firmware. | Received |
+| 433 MHz RF transmitter + receiver | [SYN115/SYN480R 433MHz transmitter receiver pair](https://shopee.com.my/1Set-2Pcs-433MHZ-Wireless-Transmitter-Receiver-Board-Module-SYN115-SYN480R-ASK-OOK-Chip-PCB-for-arduino-i.72422724.21780766516) | SYN115 transmitter + SYN480R receiver, 433MHz | RF TX sends Fanzo/RF fan commands. RF RX captures/learns the original remote signal. | Pending |
+| NPN transistor | [Transistor 2N Series](https://my.shp.ee/Lde77knv) | 2N3904; do not use PNP parts such as 2N3906 or 2N2907 | Drives the IR LED with more current than ESP32 GPIO can safely supply. Needed for stronger AC IR transmit range. | Received |
+| IR receiver + small IR transmitter module | [HX1838 Infrared IR Receiver Sensor And LED Transmitter Module](https://my.shp.ee/7tuaENzw) | HX1838 receiver + LED transmitter module | IR receiver learns/captures AC remote signals. Small transmitter module can be used for short-range testing. | Received |
+| IR emitter LED pack | [10pcs F3mm F5mm LED Infrared Emitting Diode](https://my.shp.ee/e6HjUNmi) | 5 mm IR emitter 940 nm; choose emitter, not receiver/photodiode/phototransistor | Final AC IR transmitter LED. Connect through 100 ohm resistor and 2N3904 transistor driver. | Pending |
+| 1k resistor | [10pcs/pk Resistor 1/4W 1ohm to 1m ohm](https://shopee.com.my/10pcs-pk-Resistor-1-4W-1ohm-10ohm-100ohm-1k-ohm-10k-ohm-100k-ohm-1m-ohm-10m-ohm-5-Fixed-Resistor-i.20221256.7267802426) | 1k | ESP32 GPIO4 to 2N3904 base. | Pending |
+| 100 ohm resistor | [10pcs/pk Resistor 1/4W 1ohm to 1m ohm](https://shopee.com.my/10pcs-pk-Resistor-1-4W-1ohm-10ohm-100ohm-1k-ohm-10k-ohm-100k-ohm-1m-ohm-10m-ohm-5-Fixed-Resistor-i.20221256.7267802426) | 100 ohm | IR LED current limit. | Received |
+| Jumper wires | [Male to Male 40pcs Dupont Jumper Wire](https://shopee.com.my/Male-to-Male-%28MM%29-40pcs-Dupont-Jumper-Wire-DIY-Experiment-Breadboard-Rainbow-40p-Wires-Cable-10cm-20cm-30cm-for-Arduino-i.1389163043.48700856188) | Male-to-male, 10cm, 40pcs | Breadboard wiring between ESP32, RF modules, IR receiver, and IR driver. This setup uses 14 male-to-male jumpers minimum. | Pending |
+| Breadboard | [Mini 400 Points Solderless Prototype Breadboard](https://shopee.com.my/Mini-400-Points-Solderless-Prototype-Breadboard-for-Experiments-Projects-Papan-Tampa-Pematerian--i.53171392.3741813404) | 400 holes | Mounts ESP32, RF TX/RX, IR receiver, IR LED, transistor, and resistors with no loose modules. Compact build; cramped but workable. | Received |
 
 If you use a ready-made IR transmitter module, connect its signal pin to GPIO4, VCC to 3.3V first, and GND to GND. For reliable 2m or longer AC control, use the 5 mm 940 nm IR LED plus transistor circuit below.
 
+## Breadboard and jumper plan
+
+Use a 400-hole MB102 breadboard for the compact build. It is enough for the ESP32 and all modules mounted on the same breadboard with no loose modules, but the layout will be cramped. Use an 830-hole breadboard only if you want easier debugging and more space between parts.
+
+Assumption: ESP32 and modules have male header pins and plug directly into the breadboard. If any module has no header pins, solder male header pins to it first.
+
+Minimum jumper count:
+
+| Jumper type | Minimum count | Recommended purchase | Purpose |
+| --- | --- | --- | --- |
+| Male-to-male | 14 | 40pcs pack, 10cm | All breadboard wiring. |
+| Male-to-female | 0 | Not needed | Only needed if a module is not plugged into the breadboard. |
+| Female-to-female | 0 | Not needed | Only needed for direct module-to-module pin wiring without breadboard. |
+
+Male-to-male count breakdown:
+
+| Wiring group | Count |
+| --- | --- |
+| ESP32 3V3 to breadboard 3V3 rail | 1 |
+| ESP32 GND to breadboard GND rail | 1 |
+| ESP32 5V/VIN to breadboard 5V rail for IR LED driver | 1 |
+| SYN115 VCC/GND to rails | 2 |
+| SYN115 DATA to GPIO26 | 1 |
+| SYN480R VCC/GND to rails | 2 |
+| SYN480R DATA to GPIO27 | 1 |
+| HX1838 VCC/GND to rails | 2 |
+| HX1838 OUT to GPIO14 | 1 |
+| GPIO4 to 1k resistor / 2N3904 base node | 1 |
+| 2N3904 emitter to GND rail | 1 |
+
+The 1k resistor, 100 ohm resistor, 2N3904, and 5 mm IR LED plug directly into breadboard holes, so they do not need female jumper wires.
+
+Final compact breadboard layout reference:
+
+![Final purchased breadboard layout](final-purchased-breadboard-layout.png)
+
+Use the image for physical placement. Use the connection summary below for exact GPIO wiring.
+
 ## Circuit diagram
 
-![ESP32 RF and IR room node circuit diagram](docs/circuit-diagram.svg)
+![ESP32 RF and IR room node circuit diagram](circuit-diagram.svg)
 
 Connection summary:
 
 | Part | Pin | Connect to |
 | --- | --- | --- |
-| RF transmitter | DATA | ESP32 GPIO26 |
-| RF transmitter | VCC | ESP32 5V/VIN |
-| RF transmitter | GND | ESP32 GND |
-| RF receiver | DATA | 10k resistor, then ESP32 GPIO27; add 20k/22k from GPIO27 side to GND |
-| RF receiver | VCC | ESP32 5V/VIN |
-| RF receiver | GND | ESP32 GND |
+| SYN115 RF transmitter | DATA | ESP32 GPIO26 |
+| SYN115 RF transmitter | VCC | ESP32 3V3 |
+| SYN115 RF transmitter | GND | ESP32 GND |
+| SYN480R RF receiver | DATA | ESP32 GPIO27 |
+| SYN480R RF receiver | VCC | ESP32 3V3 |
+| SYN480R RF receiver | GND | ESP32 GND |
 | IR receiver | OUT/SIGNAL | ESP32 GPIO14 |
 | IR receiver | VCC | ESP32 3V3 |
 | IR receiver | GND | ESP32 GND |
@@ -58,7 +97,7 @@ Connection summary:
 | IR LED driver | 2N3904 collector | IR LED short leg |
 | IR LED driver | IR LED long leg | 100 ohm resistor to ESP32 5V/VIN |
 
-Important: ESP32 GPIO is not 5V tolerant. If the RF receiver is powered from 5V, use the voltage divider before GPIO27.
+Important: keep the SYN115 transmitter and SYN480R receiver powered from ESP32 3V3. Do not power the RF receiver from 5V when DATA is connected directly to GPIO27.
 
 ## Laptop setup
 
