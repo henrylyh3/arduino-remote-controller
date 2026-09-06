@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS buttons (
     name TEXT NOT NULL,
     signal_type TEXT NOT NULL CHECK(signal_type IN ('rf', 'ir')),
     payload TEXT NOT NULL,
+    starred INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE TABLE IF NOT EXISTS workflows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    starred INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -136,6 +138,11 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        for table in ("buttons", "workflows"):
+            columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if "starred" not in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+                conn.execute(f"UPDATE {table} SET starred = 1")
 
 
 def fetch_all(query: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:

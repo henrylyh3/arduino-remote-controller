@@ -141,6 +141,15 @@ APP_TIMEZONE=Asia/Kuala_Lumpur uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## Timers and workflows
 
+The dashboard has two tabs:
+
+- `Control`: run saved signals or workflows, add timers, add schedules, view active jobs, and view the event log.
+- `Configuration`: add nodes, learn/rename/delete signals, and create/edit workflows.
+
+Signals and workflows are both actions. The same timer and schedule forms can target either one; only workflows contain multiple steps.
+Star signals and workflows under `Configuration` to choose which action tiles appear under `Control`. Starred workflows appear first; starred signals are grouped into node tabs below them. Configuration signals are also grouped by node. Timer and schedule selectors still include all configured actions.
+Desktop timer delays are entered in minutes and accept positive decimals. On mobile, use the native minute and second selectors. Timer names are generated from the selected action. Workflow minute/hour delays also accept decimals; for example, `0.1` minute is stored as `6` seconds. Use `0` on a workflow step for no delay.
+
 Single timer:
 
 ```text
@@ -162,9 +171,9 @@ after 30 minutes -> press Fan Speed 1
 ```
 
 Workflow step delays are relative. The next delay starts after the previous action succeeds. If one step fails, later steps are cancelled.
-Saved workflows can be edited from the dashboard. Edits affect future runs, not runs already created.
+Saved workflows can be edited from the `Configuration` tab. Edits affect future runs, not runs already created.
 
-Workflow schedule:
+Schedules can run either a signal or a workflow:
 
 ```text
 daily at 22:30 -> start Night routine
@@ -184,7 +193,9 @@ node: Bedroom ESP32
 signal: RF 433MHz
 ```
 
-When capture succeeds, the learned signal is saved as a dashboard button automatically. Name the signal with the device/action you want to recognise later, such as `Bedroom AC Cool 24` or `Living fan speed 2`.
+When capture succeeds, the learned signal is saved as a dashboard action automatically. Name the signal with the device/action you want to recognise later, such as `Bedroom AC Cool 24` or `Living fan speed 2`. Rename or delete it under `Configuration` -> `Signals`. A signal used by a workflow cannot be deleted until it is removed from that workflow.
+
+If the same signal is captured again on the same ESP32 node, the dashboard shows the existing saved signal name and does not create a duplicate button. RF duplicates are matched by code, bit length, and protocol. IR raw duplicates allow small timing differences between captures.
 
 ## ESP32 setup
 
@@ -221,10 +232,10 @@ Starter pins:
 | IR TX | 4 |
 | IR RX | 14 |
 
-After Wi-Fi setup, open Serial Monitor and copy the ESP32 IP. Add that IP as a node in the dashboard, for example:
+After Wi-Fi setup, open Serial Monitor and copy the ESP32 IP. Add that IP as a node in the dashboard; `http://` is added automatically. For example:
 
 ```text
-http://192.168.1.42
+192.168.1.42
 ```
 
 ## ESP32 HTTP API

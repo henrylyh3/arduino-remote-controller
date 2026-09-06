@@ -51,6 +51,14 @@ class LearnSignalIn(BaseModel):
     timeout_ms: int = Field(default=8000, ge=1000, le=30000)
 
 
+class SignalUpdateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class StarIn(BaseModel):
+    starred: bool
+
+
 class TimerIn(BaseModel):
     button_id: int
     seconds: int = Field(gt=0, le=7 * 24 * 60 * 60)
@@ -73,6 +81,11 @@ class WorkflowStepIn(BaseModel):
 class WorkflowIn(BaseModel):
     name: str = Field(default="Workflow", min_length=1, max_length=80)
     steps: list[WorkflowStepIn] = Field(min_length=1, max_length=20)
+
+
+class WorkflowRunIn(BaseModel):
+    delay_seconds: int = Field(default=0, ge=0, le=7 * 24 * 60 * 60)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class WorkflowScheduleIn(BaseModel):
@@ -197,6 +210,79 @@ def validate_ir_payload(payload: dict[str, Any]) -> tuple[list[int], int, int]:
     return durations, khz, repeat
 
 
+def rf_payload_matches(existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    try:
+        return all(
+            int(existing[key]) == int(candidate[key])
+            for key in ("code", "bits", "protocol")
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def ir_duration_matches(existing: int, candidate: int) -> bool:
+    tolerance = max(200, int(max(existing, candidate) * 0.25))
+    return abs(existing - candidate) <= tolerance
+
+
+def ir_payload_matches(existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    try:
+        existing_raw, existing_khz, _ = validate_ir_payload(existing)
+        candidate_raw, candidate_khz, _ = validate_ir_payload(candidate)
+    except CommandError:
+        return False
+    if existing_khz != candidate_khz or len(existing_raw) != len(candidate_raw):
+        return False
+    return all(
+        ir_duration_matches(existing_duration, candidate_duration)
+        for existing_duration, candidate_duration in zip(existing_raw, candidate_raw)
+    )
+
+
+def signal_payload_matches(
+    signal_type: Literal["rf", "ir"],
+    existing_payload: dict[str, Any],
+    candidate_payload: dict[str, Any],
+) -> bool:
+    if signal_type == "rf":
+        return rf_payload_matches(existing_payload, candidate_payload)
+    return ir_payload_matches(existing_payload, candidate_payload)
+
+
+def find_duplicate_signal(
+    node_id: int,
+    signal_type: Literal["rf", "ir"],
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    buttons = db.fetch_all(
+        """
+        SELECT
+            buttons.id,
+            buttons.name,
+            buttons.signal_type,
+            buttons.payload,
+            devices.name AS device_name,
+            nodes.name AS node_name
+        FROM buttons
+        JOIN devices ON devices.id = buttons.device_id
+        JOIN nodes ON nodes.id = devices.node_id
+        WHERE devices.node_id = ? AND buttons.signal_type = ?
+        ORDER BY buttons.created_at ASC, buttons.id ASC
+        """,
+        (node_id, signal_type),
+    )
+    for button in buttons:
+        if signal_payload_matches(signal_type, json_loads(button["payload"]), payload):
+            return {
+                "id": button["id"],
+                "name": button["name"],
+                "device_name": button["device_name"],
+                "node_name": button["node_name"],
+                "signal_type": button["signal_type"],
+            }
+    return None
+
+
 async def send_button_to_node(button_id: int) -> dict[str, Any]:
     button = ensure_button_exists(button_id)
     if not button["node_enabled"]:
@@ -232,7 +318,12 @@ async def send_button_to_node(button_id: int) -> dict[str, Any]:
     return {"ok": True, "message": message}
 
 
-def create_workflow_run_record(workflow_id: int) -> dict[str, Any]:
+def create_workflow_run_record(
+    workflow_id: int,
+    *,
+    start_delay_seconds: int = 0,
+    run_name: str | None = None,
+) -> dict[str, Any]:
     workflow = db.fetch_one("SELECT * FROM workflows WHERE id = ?", (workflow_id,))
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -249,11 +340,14 @@ def create_workflow_run_record(workflow_id: int) -> dict[str, Any]:
     if not steps:
         raise HTTPException(status_code=422, detail="Workflow has no steps")
 
-    first_run_at = utc_stamp(utc_now() + timedelta(seconds=steps[0]["delay_seconds"]))
+    first_run_at = utc_stamp(
+        utc_now() + timedelta(seconds=start_delay_seconds + steps[0]["delay_seconds"])
+    )
+    name = run_name.strip() if run_name else workflow["name"]
     with db.connect() as conn:
         cursor = conn.execute(
             "INSERT INTO workflow_runs (workflow_id, name, status) VALUES (?, ?, 'pending')",
-            (workflow_id, workflow["name"]),
+            (workflow_id, name),
         )
         run_id = int(cursor.lastrowid)
         conn.executemany(
@@ -275,7 +369,7 @@ def create_workflow_run_record(workflow_id: int) -> dict[str, Any]:
                 for index, step in enumerate(steps)
             ],
         )
-    return {"id": run_id, "first_run_at_utc": first_run_at, "name": workflow["name"]}
+    return {"id": run_id, "first_run_at_utc": first_run_at, "name": name}
 
 
 async def run_due_timers() -> None:
@@ -522,7 +616,7 @@ def state() -> dict[str, Any]:
     workflow_run_steps = db.fetch_all(
         "SELECT * FROM workflow_run_steps ORDER BY run_id, step_order"
     )
-    events = db.fetch_all("SELECT * FROM events ORDER BY created_at DESC LIMIT 40")
+    events = db.fetch_all("SELECT * FROM events ORDER BY created_at DESC LIMIT 10")
     stats = {
         row["button_id"]: row
         for row in db.fetch_all(
@@ -536,6 +630,7 @@ def state() -> dict[str, Any]:
     }
     for button in buttons:
         button["payload"] = json_loads(button["payload"])
+        button["starred"] = bool(button["starred"])
         button["stats"] = stats.get(button["id"], {"press_count": 0, "last_pressed": None})
     for node in nodes:
         node["enabled"] = bool(node["enabled"])
@@ -545,6 +640,8 @@ def state() -> dict[str, Any]:
     for schedule in workflow_schedules:
         schedule["enabled"] = bool(schedule["enabled"])
         schedule["days"] = [int(day) for day in schedule["days"].split(",") if day != ""]
+    for workflow in workflows:
+        workflow["starred"] = bool(workflow["starred"])
     return {
         "nodes": nodes,
         "devices": devices,
@@ -667,12 +764,63 @@ async def capture_signal(
 @app.post("/api/signals/learn")
 async def learn_signal(signal: LearnSignalIn) -> dict[str, Any]:
     normalized = await capture_from_node(signal.node_id, signal.signal_type, signal.timeout_ms)
+    duplicate = find_duplicate_signal(signal.node_id, signal.signal_type, normalized)
+    if duplicate:
+        return {"duplicate": True, "existing": duplicate, "payload": normalized}
+
     device_id = ensure_signal_device(signal.node_id)
     button_id = db.execute(
         "INSERT INTO buttons (device_id, name, signal_type, payload) VALUES (?, ?, ?, ?)",
         (device_id, signal.name.strip(), signal.signal_type, json_dumps(normalized)),
     )
-    return {"id": button_id, "name": signal.name.strip(), "payload": normalized}
+    return {"duplicate": False, "id": button_id, "name": signal.name.strip(), "payload": normalized}
+
+
+@app.put("/api/signals/{signal_id}")
+def update_signal(signal_id: int, signal: SignalUpdateIn) -> dict[str, Any]:
+    ensure_button_exists(signal_id)
+    name = signal.name.strip()
+    db.execute("UPDATE buttons SET name = ? WHERE id = ?", (name, signal_id))
+    return {"id": signal_id, "name": name}
+
+
+@app.delete("/api/signals/{signal_id}")
+def delete_signal(signal_id: int) -> dict[str, Any]:
+    ensure_button_exists(signal_id)
+    workflows = db.fetch_all(
+        """
+        SELECT DISTINCT workflows.name
+        FROM workflow_steps
+        JOIN workflows ON workflows.id = workflow_steps.workflow_id
+        WHERE workflow_steps.button_id = ?
+        ORDER BY workflows.name
+        """,
+        (signal_id,),
+    )
+    if workflows:
+        names = ", ".join(workflow["name"] for workflow in workflows)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Signal is used by workflow: {names}. Edit the workflow before deleting it.",
+        )
+    db.execute("DELETE FROM buttons WHERE id = ?", (signal_id,))
+    return {"ok": True}
+
+
+@app.put("/api/actions/{action_type}/{action_id}/star")
+def set_action_star(
+    action_type: Literal["signal", "workflow"],
+    action_id: int,
+    star: StarIn,
+) -> dict[str, Any]:
+    table = "buttons" if action_type == "signal" else "workflows"
+    if not db.fetch_one(f"SELECT id FROM {table} WHERE id = ?", (action_id,)):
+        raise HTTPException(status_code=404, detail="Action not found")
+    db.execute(
+        f"UPDATE {table} SET starred = ? WHERE id = ?",
+        (int(star.starred), action_id),
+    )
+    return {"ok": True, "starred": star.starred}
 
 
 @app.post("/api/timers")
@@ -748,8 +896,13 @@ def update_workflow(workflow_id: int, workflow: WorkflowIn) -> dict[str, Any]:
 
 
 @app.post("/api/workflows/{workflow_id}/run")
-def run_workflow(workflow_id: int) -> dict[str, Any]:
-    return create_workflow_run_record(workflow_id)
+def run_workflow(workflow_id: int, run: WorkflowRunIn | None = None) -> dict[str, Any]:
+    run = run or WorkflowRunIn()
+    return create_workflow_run_record(
+        workflow_id,
+        start_delay_seconds=run.delay_seconds,
+        run_name=run.name,
+    )
 
 
 @app.post("/api/workflow-runs/{run_id}/cancel")

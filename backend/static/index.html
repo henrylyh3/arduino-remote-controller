@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local RF/IR Controller</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260906-5" />
   </head>
   <body>
     <header class="topbar">
@@ -18,16 +18,84 @@
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel main-panel">
-        <div class="section-head">
-          <h2>Signals</h2>
-          <button id="refreshButton" class="secondary" type="button">Refresh</button>
-        </div>
-        <div id="deviceGrid" class="device-grid"></div>
-      </section>
+    <nav class="tabs" role="tablist" aria-label="Controller sections">
+      <button id="controlTab" class="tab is-active" type="button" role="tab" aria-selected="true" aria-controls="controlPanel" data-tab="control">
+        Control
+      </button>
+      <button id="configurationTab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="configurationPanel" data-tab="configuration">
+        Configuration
+      </button>
+    </nav>
 
-      <aside class="side-stack">
+    <div id="controlPanel" class="tab-panel" role="tabpanel" aria-labelledby="controlTab">
+      <main class="layout control-layout">
+        <section class="panel span-full">
+          <div class="section-head">
+            <h2>Actions</h2>
+            <button id="refreshButton" class="secondary" type="button">Refresh</button>
+          </div>
+          <div id="actionGrid" class="action-layout"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Add timer</h2>
+          <form id="timerForm" class="form compact-form">
+            <label>
+              Action
+              <select name="target" id="timerTarget" required></select>
+            </label>
+            <label class="timer-delay-desktop">
+              Delay in minutes
+              <input name="minutes" type="number" max="10080" step="any" value="30" required />
+            </label>
+            <div class="timer-delay-mobile" role="group" aria-label="Timer delay">
+              <label>
+                Minutes
+                <select name="mobile_minutes" id="timerMinutes"></select>
+              </label>
+              <label>
+                Seconds
+                <select name="mobile_seconds" id="timerSeconds"></select>
+              </label>
+            </div>
+            <button type="submit">Start timer</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Active jobs</h2>
+          <div id="activeJobList" class="list"></div>
+        </section>
+
+        <section class="panel span-full">
+          <h2>Schedules</h2>
+          <form id="scheduleForm" class="schedule-form">
+            <select name="target" id="scheduleTarget" aria-label="Action" required></select>
+            <input name="name" autocomplete="off" aria-label="Schedule name" placeholder="Weekday night" />
+            <input name="time_of_day" type="time" aria-label="Start time" required />
+            <fieldset>
+              <label><input type="checkbox" name="days" value="0" checked /> Mon</label>
+              <label><input type="checkbox" name="days" value="1" checked /> Tue</label>
+              <label><input type="checkbox" name="days" value="2" checked /> Wed</label>
+              <label><input type="checkbox" name="days" value="3" checked /> Thu</label>
+              <label><input type="checkbox" name="days" value="4" checked /> Fri</label>
+              <label><input type="checkbox" name="days" value="5" /> Sat</label>
+              <label><input type="checkbox" name="days" value="6" /> Sun</label>
+            </fieldset>
+            <button type="submit">Save schedule</button>
+          </form>
+          <div id="scheduleList" class="list"></div>
+        </section>
+
+        <section class="panel span-full">
+          <h2>Event log</h2>
+          <div id="eventList" class="list"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="configurationPanel" class="tab-panel" role="tabpanel" aria-labelledby="configurationTab" hidden>
+      <main class="layout configuration-layout">
         <section class="panel">
           <h2>Add node</h2>
           <form id="nodeForm" class="form">
@@ -36,12 +104,8 @@
               <input name="name" required autocomplete="off" placeholder="Bedroom ESP32" />
             </label>
             <label>
-              Room
-              <input name="room" autocomplete="off" placeholder="Bedroom" />
-            </label>
-            <label>
-              Base URL
-              <input name="base_url" required autocomplete="off" placeholder="http://192.168.1.42" />
+              ESP32 IP
+              <input name="base_url" required autocomplete="off" placeholder="192.168.0.14" />
             </label>
             <button type="submit">Save node</button>
           </form>
@@ -72,90 +136,34 @@
             <button type="submit">Capture and save</button>
           </form>
         </section>
-      </aside>
 
-      <section class="panel">
-        <h2>Timers</h2>
-        <form id="timerForm" class="inline-form">
-          <select name="button_id" id="timerButton" required></select>
-          <input name="name" autocomplete="off" placeholder="Sleep timer" />
-          <input name="seconds" type="number" min="1" max="604800" value="1800" required />
-          <button type="submit">Start</button>
-        </form>
-        <div id="timerList" class="list"></div>
-      </section>
+        <section class="panel span-full">
+          <h2>Signals</h2>
+          <div id="signalConfigList" class="list configuration-list"></div>
+        </section>
 
-      <section class="panel">
-        <h2>Active jobs</h2>
-        <div id="activeJobList" class="list"></div>
-      </section>
-
-      <section class="panel">
-        <div class="section-head">
-          <h2>Workflows</h2>
-          <button id="addWorkflowStep" class="secondary" type="button">Add step</button>
-        </div>
-        <form id="workflowForm" class="form">
-          <label>
-            Name
-            <input name="name" autocomplete="off" placeholder="Night routine" />
-          </label>
-          <div id="workflowSteps" class="workflow-steps"></div>
-          <div class="workflow-actions">
-            <button id="saveWorkflowButton" type="submit">Save workflow</button>
-            <button id="cancelWorkflowEdit" class="secondary" type="button" hidden>Cancel edit</button>
+        <section class="panel span-full">
+          <div class="section-head">
+            <h2>Workflows</h2>
+            <button id="addWorkflowStep" class="secondary" type="button">Add step</button>
           </div>
-        </form>
-        <div id="workflowList" class="list"></div>
-      </section>
+          <form id="workflowForm" class="form">
+            <label>
+              Name
+              <input name="name" autocomplete="off" placeholder="Night routine" />
+            </label>
+            <div id="workflowSteps" class="workflow-steps"></div>
+            <div class="workflow-actions">
+              <button id="saveWorkflowButton" type="submit">Save workflow</button>
+              <button id="cancelWorkflowEdit" class="secondary" type="button" hidden>Cancel edit</button>
+            </div>
+          </form>
+          <div id="workflowList" class="list"></div>
+        </section>
+      </main>
+    </div>
 
-      <section class="panel">
-        <h2>Workflow schedules</h2>
-        <form id="workflowScheduleForm" class="schedule-form">
-          <select name="workflow_id" id="workflowScheduleWorkflow" required></select>
-          <input name="name" autocomplete="off" placeholder="Weekday night routine" />
-          <input name="time_of_day" type="time" required />
-          <fieldset>
-            <label><input type="checkbox" name="days" value="0" checked /> Mon</label>
-            <label><input type="checkbox" name="days" value="1" checked /> Tue</label>
-            <label><input type="checkbox" name="days" value="2" checked /> Wed</label>
-            <label><input type="checkbox" name="days" value="3" checked /> Thu</label>
-            <label><input type="checkbox" name="days" value="4" checked /> Fri</label>
-            <label><input type="checkbox" name="days" value="5" /> Sat</label>
-            <label><input type="checkbox" name="days" value="6" /> Sun</label>
-          </fieldset>
-          <button type="submit">Save</button>
-        </form>
-        <div id="workflowScheduleList" class="list"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Schedules</h2>
-        <form id="scheduleForm" class="schedule-form">
-          <select name="button_id" id="scheduleButton" required></select>
-          <input name="name" autocomplete="off" placeholder="Night cooling" />
-          <input name="time_of_day" type="time" required />
-          <fieldset>
-            <label><input type="checkbox" name="days" value="0" checked /> Mon</label>
-            <label><input type="checkbox" name="days" value="1" checked /> Tue</label>
-            <label><input type="checkbox" name="days" value="2" checked /> Wed</label>
-            <label><input type="checkbox" name="days" value="3" checked /> Thu</label>
-            <label><input type="checkbox" name="days" value="4" checked /> Fri</label>
-            <label><input type="checkbox" name="days" value="5" /> Sat</label>
-            <label><input type="checkbox" name="days" value="6" /> Sun</label>
-          </fieldset>
-          <button type="submit">Save</button>
-        </form>
-        <div id="scheduleList" class="list"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Event log</h2>
-        <div id="eventList" class="list"></div>
-      </section>
-    </main>
-
-    <div id="toast" class="toast" hidden></div>
-    <script src="/static/app.js" type="module"></script>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/static/app.js?v=20260906-5" type="module"></script>
   </body>
 </html>

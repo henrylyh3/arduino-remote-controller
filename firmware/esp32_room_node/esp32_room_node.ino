@@ -14,7 +14,7 @@ const uint8_t RF_TX_PIN = 26;
 const uint8_t RF_RX_PIN = 27;
 const uint8_t IR_TX_PIN = 4;
 const uint8_t IR_RX_PIN = 14;
-const uint8_t BOOT_PIN = 0;
+const uint8_t CONFIG_RESET_PIN = 0;
 
 const uint16_t IR_CAPTURE_BUFFER = 1024;
 const uint8_t IR_TIMEOUT_MS = 50;
@@ -255,8 +255,8 @@ void handleNotFound() {
 }
 
 void loadConfig() {
-  pinMode(BOOT_PIN, INPUT_PULLUP);
-  bool resetConfig = digitalRead(BOOT_PIN) == LOW;
+  pinMode(CONFIG_RESET_PIN, INPUT_PULLUP);
+  bool resetConfig = digitalRead(CONFIG_RESET_PIN) == LOW;
 
   prefs.begin("controller", false);
   if (resetConfig) {

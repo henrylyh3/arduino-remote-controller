@@ -15,6 +15,8 @@ const state = {
 
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 let editingWorkflowId = null;
+let selectedActionNodeId = null;
+let selectedConfigNodeId = null;
 
 const el = (id) => document.getElementById(id);
 
@@ -27,15 +29,18 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function showToast(message, isError = false) {
+function showToast(message, isError = false, durationMs = 3200) {
   const toast = el("toast");
   toast.textContent = message;
   toast.hidden = false;
   toast.style.background = isError ? "#7a1e1e" : "#17201b";
+  toast.setAttribute("role", isError ? "alert" : "status");
   clearTimeout(showToast.timeout);
-  showToast.timeout = setTimeout(() => {
-    toast.hidden = true;
-  }, 3200);
+  if (durationMs > 0) {
+    showToast.timeout = setTimeout(() => {
+      toast.hidden = true;
+    }, durationMs);
+  }
 }
 
 async function api(path, options = {}) {
@@ -56,71 +61,186 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-function optionList(items, getLabel) {
-  if (!items.length) return '<option value="">None</option>';
-  return items.map((item) => `<option value="${item.id}">${escapeHtml(getLabel(item))}</option>`).join("");
+function optionList(items, getLabel, getValue = (item) => item.id) {
+  if (!items.length) return '<option value="">None configured</option>';
+  return items
+    .map((item) => `<option value="${escapeHtml(getValue(item))}">${escapeHtml(getLabel(item))}</option>`)
+    .join("");
+}
+
+function buttonContext(button) {
+  const device = state.devices.find((item) => item.id === button.device_id);
+  const node = state.nodes.find((item) => item.id === device?.node_id);
+  return { device, node };
+}
+
+function buttonLabel(buttonId) {
+  const button = state.buttons.find((item) => item.id === Number(buttonId));
+  if (!button) return "Missing signal";
+  const { node } = buttonContext(button);
+  return `${node?.name || "Node"} / ${button.name}`;
+}
+
+function workflowLabel(workflowId) {
+  const workflow = state.workflows.find((item) => item.id === Number(workflowId));
+  return workflow?.name || "Missing workflow";
+}
+
+function workflowSteps(workflowId) {
+  return state.workflow_steps
+    .filter((step) => step.workflow_id === Number(workflowId))
+    .sort((a, b) => a.step_order - b.step_order);
+}
+
+function groupSignalsByNode(buttons) {
+  return state.nodes
+    .map((node) => {
+      const nodeButtons = buttons.filter((button) => buttonContext(button).node?.id === node.id);
+      return { node, buttons: nodeButtons };
+    })
+    .filter((group) => group.buttons.length);
+}
+
+function nodeTabs(groups, selectedNodeId, dataAttribute, label) {
+  return `
+    <div class="node-tabs" role="tablist" aria-label="${label}">
+      ${groups
+        .map((group) => `
+          <button
+            class="node-tab${group.node.id === selectedNodeId ? " is-active" : ""}"
+            type="button"
+            role="tab"
+            aria-selected="${group.node.id === selectedNodeId}"
+            ${dataAttribute}="${group.node.id}"
+          >${escapeHtml(group.node.name)}</button>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function actions() {
+  const signals = state.buttons.map((button) => ({
+    kind: "signal",
+    id: button.id,
+    value: `signal:${button.id}`,
+    name: button.name,
+    label: `Signal - ${buttonLabel(button.id)}`,
+    starred: button.starred,
+  }));
+  const workflows = state.workflows.map((workflow) => ({
+    kind: "workflow",
+    id: workflow.id,
+    value: `workflow:${workflow.id}`,
+    name: workflow.name,
+    label: `Workflow - ${workflow.name}`,
+    starred: workflow.starred,
+  }));
+  return [...signals, ...workflows];
+}
+
+function parseTarget(value) {
+  const [kind, rawId] = String(value || "").split(":");
+  const id = Number(rawId);
+  if (!id || !["signal", "workflow"].includes(kind)) {
+    throw new Error("Choose an action first");
+  }
+  return { kind, id };
+}
+
+function setSelectOptions(select, html) {
+  const selected = select.value;
+  select.innerHTML = html;
+  if ([...select.options].some((option) => option.value === selected)) {
+    select.value = selected;
+  }
 }
 
 function updateSelectors() {
-  const nodeOptions = optionList(state.nodes, (node) => `${node.room || "No room"} / ${node.name}`);
-  const buttonOptions = optionList(state.buttons, (button) => {
-    return buttonLabel(button.id);
-  });
-  const workflowOptions = optionList(state.workflows, (workflow) => workflow.name);
-
-  el("captureNode").innerHTML = nodeOptions;
-  el("timerButton").innerHTML = buttonOptions;
-  el("scheduleButton").innerHTML = buttonOptions;
-  el("workflowScheduleWorkflow").innerHTML = workflowOptions;
+  setSelectOptions(el("captureNode"), optionList(state.nodes, (node) => node.name));
+  const actionOptions = optionList(actions(), (action) => action.label, (action) => action.value);
+  setSelectOptions(el("timerTarget"), actionOptions);
+  setSelectOptions(el("scheduleTarget"), actionOptions);
   syncWorkflowStepOptions();
 }
 
-function renderDevices() {
-  const grid = el("deviceGrid");
-  if (!state.nodes.length) {
-    grid.innerHTML = '<div class="empty">Add an ESP32 node, then learn a signal.</div>';
+async function runAction(kind, id) {
+  if (kind === "signal") {
+    return api(`/api/buttons/${id}/press`, { method: "POST" });
+  }
+  return api(`/api/workflows/${id}/run`, { method: "POST", body: "{}" });
+}
+
+function renderActions() {
+  const grid = el("actionGrid");
+  const starredWorkflows = state.workflows.filter((workflow) => workflow.starred);
+  const starredSignals = state.buttons.filter((button) => button.starred);
+  const signalGroups = groupSignalsByNode(starredSignals);
+  if (!starredWorkflows.length && !starredSignals.length) {
+    grid.innerHTML = '<div class="empty">No starred actions. Star one under Configuration.</div>';
     return;
   }
 
-  grid.innerHTML = state.nodes
-    .map((node) => {
-      const nodeDevices = state.devices.filter((device) => device.node_id === node.id);
-      const deviceIds = new Set(nodeDevices.map((device) => device.id));
-      const buttons = state.buttons.filter((button) => deviceIds.has(button.device_id));
-      const buttonHtml = buttons.length
-        ? buttons
+  if (!signalGroups.some((group) => group.node.id === selectedActionNodeId)) {
+    selectedActionNodeId = signalGroups[0]?.node.id || null;
+  }
+  const selectedGroup = signalGroups.find((group) => group.node.id === selectedActionNodeId);
+  const workflowHtml = starredWorkflows.length
+    ? `
+      <section class="action-section">
+        <h3>Workflows</h3>
+        <div class="action-tile-grid">
+          ${starredWorkflows
+            .map((workflow) => {
+              const count = workflowSteps(workflow.id).length;
+              return `
+                <button class="button-tile workflow-tile" type="button" data-action-kind="workflow" data-action-id="${workflow.id}">
+                  ${escapeHtml(workflow.name)}
+                  <span>WORKFLOW - ${count} step${count === 1 ? "" : "s"}</span>
+                </button>
+              `;
+            })
+            .join("")}
+        </div>
+      </section>
+    `
+    : "";
+  const signalsHtml = signalGroups.length
+    ? `
+      <section class="action-section">
+        <h3>Signals</h3>
+        ${nodeTabs(signalGroups, selectedActionNodeId, "data-action-node-tab", "Signal nodes")}
+        <div class="action-tile-grid node-tab-content" role="tabpanel">
+          ${selectedGroup.buttons
             .map((button) => {
               const count = button.stats?.press_count || 0;
               return `
-                <button class="button-tile" type="button" data-press="${button.id}">
+                <button class="button-tile" type="button" data-action-kind="signal" data-action-id="${button.id}">
                   ${escapeHtml(button.name)}
                   <span>${escapeHtml(button.signal_type.toUpperCase())} - ${count} sent</span>
                 </button>
               `;
             })
-            .join("")
-        : '<div class="empty">No signals learned.</div>';
-      return `
-        <article class="device">
-          <div class="device-header">
-            <div>
-              <h3>${escapeHtml(node.name)}</h3>
-              <div class="muted">${escapeHtml(node.room || "No room")} - ${escapeHtml(node.base_url)}</div>
-            </div>
-            <span class="pill">${node.enabled ? "enabled" : "disabled"}</span>
-          </div>
-          <div class="device-buttons">${buttonHtml}</div>
-        </article>
-      `;
-    })
-    .join("");
+            .join("")}
+        </div>
+      </section>
+    `
+    : "";
+  grid.innerHTML = workflowHtml + signalsHtml;
 
-  document.querySelectorAll("[data-press]").forEach((button) => {
+  grid.querySelectorAll("[data-action-node-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedActionNodeId = Number(button.dataset.actionNodeTab);
+      renderActions();
+    });
+  });
+
+  grid.querySelectorAll("[data-action-kind]").forEach((button) => {
     button.addEventListener("click", async () => {
       button.disabled = true;
       try {
-        const result = await api(`/api/buttons/${button.dataset.press}/press`, { method: "POST" });
-        showToast(result.message);
+        const result = await runAction(button.dataset.actionKind, Number(button.dataset.actionId));
+        showToast(result.message || `${button.textContent.trim().split("\n")[0]} started`);
         await loadState();
       } catch (error) {
         showToast(error.message, true);
@@ -131,42 +251,90 @@ function renderDevices() {
   });
 }
 
-function renderTimers() {
-  const target = el("timerList");
-  if (!state.timers.length) {
-    target.innerHTML = '<div class="empty">No timers.</div>';
-    return;
-  }
-  target.innerHTML = state.timers
-    .map((timer) => `
-      <div class="row">
-        <div>
-          <strong>${escapeHtml(timer.name)}</strong>
-          <div class="muted">${escapeHtml(timer.status)} - ${escapeHtml(timer.run_at_utc)}</div>
-          ${timer.error ? `<div class="bad">${escapeHtml(timer.error)}</div>` : ""}
-        </div>
-        ${timer.status === "pending" ? `<button class="secondary" type="button" data-cancel="${timer.id}">Cancel</button>` : ""}
-      </div>
-    `)
-    .join("");
-
-  document.querySelectorAll("[data-cancel]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      await api(`/api/timers/${button.dataset.cancel}/cancel`, { method: "POST" });
-      await loadState();
-    });
-  });
-}
-
 function daysLabel(days) {
   if (days.length === 7) return "daily";
   return days.map((day) => dayNames[day]).join(", ");
 }
 
-function nextWorkflowStep(runId) {
-  return state.workflow_run_steps
-    .filter((step) => step.run_id === runId && ["waiting", "pending", "running"].includes(step.status))
+function formatDelay(seconds) {
+  if (seconds === 0) return "immediate";
+  if (seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    return `${hours} hr${hours === 1 ? "" : "s"}`;
+  }
+  if (seconds % 60 === 0) return `${seconds / 60} min`;
+  return `${seconds} sec`;
+}
+
+function delayToSeconds(value, unit, allowZero = false) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0 || (!allowZero && amount === 0)) {
+    throw new Error(allowZero ? "Delay must be zero or positive" : "Delay must be positive");
+  }
+  const seconds = amount === 0 ? 0 : Math.max(1, Math.round(amount * unit));
+  if (seconds > 7 * 24 * 60 * 60) throw new Error("Delay cannot exceed 7 days");
+  return seconds;
+}
+
+function timerMinuteValues() {
+  const values = [];
+  for (let value = 0; value <= 180; value += 1) values.push(value);
+  for (let value = 185; value <= 720; value += 5) values.push(value);
+  for (let value = 750; value <= 1440; value += 30) values.push(value);
+  for (let value = 1500; value <= 10080; value += 60) values.push(value);
+  return values;
+}
+
+function setupTimerDurationPicker() {
+  el("timerMinutes").innerHTML = timerMinuteValues()
+    .map((value) => `<option value="${value}"${value === 30 ? " selected" : ""}>${value}</option>`)
+    .join("");
+  el("timerSeconds").innerHTML = Array.from({ length: 60 }, (_, value) =>
+    `<option value="${value}">${String(value).padStart(2, "0")}</option>`,
+  ).join("");
+}
+
+function starButton(actionType, actionId, starred) {
+  const label = starred ? "Remove from Actions" : "Show in Actions";
+  return `
+    <button
+      class="star-button${starred ? " is-starred" : ""}"
+      type="button"
+      data-star-type="${actionType}"
+      data-star-id="${actionId}"
+      data-starred="${starred}"
+      aria-label="${label}"
+      aria-pressed="${starred}"
+      title="${label}"
+    >${starred ? "&#9733;" : "&#9734;"}</button>
+  `;
+}
+
+function bindStarButtons(container) {
+  container.querySelectorAll("[data-star-type]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const starred = button.dataset.starred !== "true";
+      try {
+        await api(`/api/actions/${button.dataset.starType}/${button.dataset.starId}/star`, {
+          method: "PUT",
+          body: JSON.stringify({ starred }),
+        });
+        showToast(starred ? "Added to Actions" : "Removed from Actions");
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+  });
+}
+
+function runProgress(runId) {
+  const steps = state.workflow_run_steps.filter((step) => step.run_id === runId);
+  const completed = steps.filter((step) => step.status === "done").length;
+  const next = steps
+    .filter((step) => ["waiting", "pending", "running"].includes(step.status))
     .sort((a, b) => a.step_order - b.step_order)[0];
+  return { steps, completed, next };
 }
 
 function renderActiveJobs() {
@@ -177,9 +345,10 @@ function renderActiveJobs() {
     .filter((timer) => ["pending", "running"].includes(timer.status))
     .forEach((timer) => {
       jobs.push({
-        type: "timer",
+        type: "Timer",
         name: timer.name,
         detail: `${buttonLabel(timer.button_id)} - ${timer.status} - ${timer.run_at_utc}`,
+        cancelPath: `/api/timers/${timer.id}/cancel`,
       });
     });
 
@@ -187,7 +356,7 @@ function renderActiveJobs() {
     .filter((schedule) => schedule.enabled)
     .forEach((schedule) => {
       jobs.push({
-        type: "button schedule",
+        type: "Schedule",
         name: schedule.name,
         detail: `${buttonLabel(schedule.button_id)} - ${schedule.time_of_day} - ${daysLabel(schedule.days)}`,
       });
@@ -197,7 +366,7 @@ function renderActiveJobs() {
     .filter((schedule) => schedule.enabled)
     .forEach((schedule) => {
       jobs.push({
-        type: "workflow schedule",
+        type: "Schedule",
         name: schedule.name,
         detail: `${workflowLabel(schedule.workflow_id)} - ${schedule.time_of_day} - ${daysLabel(schedule.days)}`,
       });
@@ -206,12 +375,15 @@ function renderActiveJobs() {
   state.workflow_runs
     .filter((run) => ["pending", "running"].includes(run.status))
     .forEach((run) => {
-      const nextStep = nextWorkflowStep(run.id);
-      const next = nextStep ? `${formatDelay(nextStep.delay_seconds)} -> ${buttonLabel(nextStep.button_id)}` : "no next step";
+      const progress = runProgress(run.id);
+      const nextLabel = progress.next
+        ? `next: ${buttonLabel(progress.next.button_id)}${progress.next.run_after_utc ? ` at ${progress.next.run_after_utc}` : ""}`
+        : "waiting to finish";
       jobs.push({
-        type: "workflow run",
+        type: "Workflow run",
         name: run.name,
-        detail: `${run.status} - next ${next}`,
+        detail: `${progress.completed} of ${progress.steps.length} completed - ${nextLabel}`,
+        cancelPath: `/api/workflow-runs/${run.id}/cancel`,
       });
     });
 
@@ -221,81 +393,161 @@ function renderActiveJobs() {
   }
 
   target.innerHTML = jobs
-    .map((job) => `
+    .map((job, index) => `
       <div class="row">
         <div>
           <strong>${escapeHtml(job.name)}</strong>
           <div class="muted">${escapeHtml(job.type)}</div>
           <span>${escapeHtml(job.detail)}</span>
         </div>
+        ${job.cancelPath ? `<button class="secondary" type="button" data-cancel-job="${index}">Cancel</button>` : ""}
       </div>
     `)
     .join("");
+
+  document.querySelectorAll("[data-cancel-job]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const job = jobs[Number(button.dataset.cancelJob)];
+      try {
+        await api(job.cancelPath, { method: "POST" });
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+  });
 }
 
 function renderSchedules() {
   const target = el("scheduleList");
-  if (!state.schedules.length) {
+  const schedules = [
+    ...state.schedules.map((schedule) => ({ ...schedule, kind: "signal", targetLabel: buttonLabel(schedule.button_id) })),
+    ...state.workflow_schedules.map((schedule) => ({ ...schedule, kind: "workflow", targetLabel: workflowLabel(schedule.workflow_id) })),
+  ].sort((a, b) => a.time_of_day.localeCompare(b.time_of_day) || a.name.localeCompare(b.name));
+
+  if (!schedules.length) {
     target.innerHTML = '<div class="empty">No schedules.</div>';
     return;
   }
-  target.innerHTML = state.schedules
+
+  target.innerHTML = schedules
     .map((schedule) => `
       <div class="row">
         <div>
           <strong>${escapeHtml(schedule.name)}</strong>
           <div class="muted">
-            ${escapeHtml(schedule.time_of_day)} - ${schedule.days.map((day) => dayNames[day]).join(", ")}
-            - ${schedule.enabled ? "enabled" : "paused"}
+            ${escapeHtml(schedule.targetLabel)} - ${escapeHtml(schedule.time_of_day)} -
+            ${escapeHtml(daysLabel(schedule.days))} - ${schedule.enabled ? "enabled" : "paused"}
           </div>
         </div>
-        <button class="secondary" type="button" data-toggle="${schedule.id}">
+        <button class="secondary" type="button" data-toggle-schedule="${schedule.id}" data-schedule-kind="${schedule.kind}">
           ${schedule.enabled ? "Pause" : "Enable"}
         </button>
       </div>
     `)
     .join("");
 
-  document.querySelectorAll("[data-toggle]").forEach((button) => {
+  document.querySelectorAll("[data-toggle-schedule]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await api(`/api/schedules/${button.dataset.toggle}/toggle`, { method: "POST" });
-      await loadState();
+      const root = button.dataset.scheduleKind === "workflow" ? "workflow-schedules" : "schedules";
+      try {
+        await api(`/api/${root}/${button.dataset.toggleSchedule}/toggle`, { method: "POST" });
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
     });
   });
 }
 
-function formatDelay(seconds) {
-  if (seconds === 0) return "immediate";
-  if (seconds % 3600 === 0) {
-    const hours = seconds / 3600;
-    return `${hours} hr${hours === 1 ? "" : "s"}`;
+function renderSignalConfiguration() {
+  const target = el("signalConfigList");
+  if (document.activeElement?.matches("#signalConfigList input")) return;
+  if (!state.buttons.length) {
+    target.innerHTML = '<div class="empty">No learned signals.</div>';
+    return;
   }
-  if (seconds % 60 === 0) {
-    const minutes = seconds / 60;
-    return `${minutes} min`;
+
+  const signalGroups = groupSignalsByNode(state.buttons);
+  if (!signalGroups.some((group) => group.node.id === selectedConfigNodeId)) {
+    selectedConfigNodeId = signalGroups[0].node.id;
   }
-  return `${seconds} sec`;
-}
+  const selectedGroup = signalGroups.find((group) => group.node.id === selectedConfigNodeId);
+  target.innerHTML = `
+    ${nodeTabs(signalGroups, selectedConfigNodeId, "data-config-node-tab", "Configuration signal nodes")}
+    <div class="node-tab-content" role="tabpanel">
+      ${selectedGroup.buttons
+    .map((button) => {
+      const { node } = buttonContext(button);
+      return `
+        <div class="row signal-config-row">
+          <div class="signal-config-fields">
+            <label for="signal-name-${button.id}">Name</label>
+            <input id="signal-name-${button.id}" value="${escapeHtml(button.name)}" data-original-name="${escapeHtml(button.name)}" maxlength="80" autocomplete="off" />
+            <span class="muted">${escapeHtml(button.signal_type.toUpperCase())} - ${escapeHtml(node?.name || "Node")}</span>
+          </div>
+          <div class="row-actions">
+            ${starButton("signal", button.id, button.starred)}
+            <button class="secondary" type="button" data-save-signal="${button.id}" hidden>Save</button>
+            <button class="danger" type="button" data-delete-signal="${button.id}">Delete</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("")}
+    </div>
+  `;
 
-function buttonLabel(buttonId) {
-  const button = state.buttons.find((item) => item.id === Number(buttonId));
-  if (!button) return "Missing button";
-  const device = state.devices.find((item) => item.id === button.device_id);
-  const node = state.nodes.find((item) => item.id === device?.node_id);
-  return `${node?.name || "Node"} / ${button.name}`;
-}
+  target.querySelectorAll("[data-config-node-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedConfigNodeId = Number(button.dataset.configNodeTab);
+      renderSignalConfiguration();
+    });
+  });
 
-function workflowLabel(workflowId) {
-  const workflow = state.workflows.find((item) => item.id === Number(workflowId));
-  return workflow?.name || "Missing workflow";
+  target.querySelectorAll("input[data-original-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const saveButton = target.querySelector(`[data-save-signal="${input.id.replace("signal-name-", "")}"]`);
+      saveButton.hidden = input.value.trim() === input.dataset.originalName;
+    });
+  });
+
+  target.querySelectorAll("[data-save-signal]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = Number(button.dataset.saveSignal);
+      const name = el(`signal-name-${id}`).value.trim();
+      try {
+        if (!name) throw new Error("Signal name is required");
+        await api(`/api/signals/${id}`, { method: "PUT", body: JSON.stringify({ name }) });
+        showToast("Signal updated");
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+  });
+
+  target.querySelectorAll("[data-delete-signal]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = Number(button.dataset.deleteSignal);
+      const signal = state.buttons.find((item) => item.id === id);
+      if (!window.confirm(`Delete signal "${signal?.name || "Unknown"}"?`)) return;
+      try {
+        await api(`/api/signals/${id}`, { method: "DELETE" });
+        showToast("Signal deleted");
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+  });
+  bindStarButtons(target);
 }
 
 function syncWorkflowStepOptions() {
   const options = optionList(state.buttons, (button) => buttonLabel(button.id));
   document.querySelectorAll("#workflowSteps select[name='button_id']").forEach((select) => {
-    const selected = select.value;
-    select.innerHTML = options;
-    if (selected) select.value = selected;
+    setSelectOptions(select, options);
   });
 }
 
@@ -303,12 +555,12 @@ function addWorkflowStepRow(delay = 30, unit = 60, buttonId = "") {
   const row = document.createElement("div");
   row.className = "workflow-step";
   row.innerHTML = `
-    <input name="delay" type="number" min="0" max="10080" value="${delay}" required />
-    <select name="unit">
+    <input name="delay" aria-label="Delay" type="number" min="0" max="10080" step="any" value="${delay}" required />
+    <select name="unit" aria-label="Delay unit">
       <option value="60"${unit === 60 ? " selected" : ""}>minutes</option>
       <option value="3600"${unit === 3600 ? " selected" : ""}>hours</option>
     </select>
-    <select name="button_id" required></select>
+    <select name="button_id" aria-label="Signal" required></select>
     <button class="secondary" type="button" data-remove-step>Remove</button>
   `;
   el("workflowSteps").appendChild(row);
@@ -320,10 +572,8 @@ function addWorkflowStepRow(delay = 30, unit = 60, buttonId = "") {
 }
 
 function splitDelay(seconds) {
-  if (seconds > 0 && seconds % 3600 === 0) {
-    return { delay: seconds / 3600, unit: 3600 };
-  }
-  return { delay: seconds / 60, unit: 60 };
+  if (seconds > 0 && seconds % 3600 === 0) return { delay: seconds / 3600, unit: 3600 };
+  return { delay: Number((seconds / 60).toFixed(4)), unit: 60 };
 }
 
 function resetWorkflowForm() {
@@ -342,11 +592,7 @@ function editWorkflow(workflowId) {
   editingWorkflowId = workflow.id;
   el("workflowForm").querySelector("input[name='name']").value = workflow.name;
   el("workflowSteps").innerHTML = "";
-
-  const steps = state.workflow_steps
-    .filter((step) => step.workflow_id === workflow.id)
-    .sort((a, b) => a.step_order - b.step_order);
-
+  const steps = workflowSteps(workflow.id);
   steps.forEach((step) => {
     const { delay, unit } = splitDelay(step.delay_seconds);
     addWorkflowStepRow(delay, unit, step.button_id);
@@ -359,7 +605,7 @@ function editWorkflow(workflowId) {
 }
 
 function workflowStepSummary(workflowId) {
-  const steps = state.workflow_steps.filter((step) => step.workflow_id === workflowId);
+  const steps = workflowSteps(workflowId);
   if (!steps.length) return '<div class="muted">No steps.</div>';
   return `
     <div class="step-summary">
@@ -373,22 +619,14 @@ function workflowStepSummary(workflowId) {
   `;
 }
 
-function workflowRunSummary(runId) {
-  const steps = state.workflow_run_steps.filter((step) => step.run_id === runId);
-  if (!steps.length) return "";
-  return steps
-    .map((step) => `${step.step_order}:${step.status}`)
-    .join(" / ");
-}
-
 function renderWorkflows() {
   const target = el("workflowList");
-  if (!state.workflows.length && !state.workflow_runs.length) {
+  if (!state.workflows.length) {
     target.innerHTML = '<div class="empty">No workflows.</div>';
     return;
   }
 
-  const workflowsHtml = state.workflows
+  target.innerHTML = state.workflows
     .map((workflow) => `
       <div class="row">
         <div>
@@ -396,86 +634,17 @@ function renderWorkflows() {
           ${workflowStepSummary(workflow.id)}
         </div>
         <div class="row-actions">
+          ${starButton("workflow", workflow.id, workflow.starred)}
           <button class="secondary" type="button" data-edit-workflow="${workflow.id}">Edit</button>
-          <button type="button" data-run-workflow="${workflow.id}">Run</button>
         </div>
       </div>
     `)
     .join("");
-
-  const runsHtml = state.workflow_runs
-    .map((run) => `
-      <div class="row">
-        <div>
-          <strong>Run: ${escapeHtml(run.name)}</strong>
-          <div class="muted">${escapeHtml(run.status)} - ${escapeHtml(run.created_at)}</div>
-          <span>${escapeHtml(workflowRunSummary(run.id))}</span>
-          ${run.error ? `<div class="bad">${escapeHtml(run.error)}</div>` : ""}
-        </div>
-        ${["pending", "running"].includes(run.status) ? `<button class="secondary" type="button" data-cancel-run="${run.id}">Cancel</button>` : ""}
-      </div>
-    `)
-    .join("");
-
-  target.innerHTML = workflowsHtml + runsHtml;
 
   document.querySelectorAll("[data-edit-workflow]").forEach((button) => {
     button.addEventListener("click", () => editWorkflow(button.dataset.editWorkflow));
   });
-
-  document.querySelectorAll("[data-run-workflow]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      try {
-        await api(`/api/workflows/${button.dataset.runWorkflow}/run`, { method: "POST" });
-        showToast("Workflow started");
-        await loadState();
-      } catch (error) {
-        showToast(error.message, true);
-      } finally {
-        button.disabled = false;
-      }
-    });
-  });
-
-  document.querySelectorAll("[data-cancel-run]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      await api(`/api/workflow-runs/${button.dataset.cancelRun}/cancel`, { method: "POST" });
-      await loadState();
-    });
-  });
-}
-
-function renderWorkflowSchedules() {
-  const target = el("workflowScheduleList");
-  if (!state.workflow_schedules.length) {
-    target.innerHTML = '<div class="empty">No workflow schedules.</div>';
-    return;
-  }
-  target.innerHTML = state.workflow_schedules
-    .map((schedule) => `
-      <div class="row">
-        <div>
-          <strong>${escapeHtml(schedule.name)}</strong>
-          <div class="muted">
-            ${escapeHtml(workflowLabel(schedule.workflow_id))} - ${escapeHtml(schedule.time_of_day)}
-            - ${schedule.days.map((day) => dayNames[day]).join(", ")}
-            - ${schedule.enabled ? "enabled" : "paused"}
-          </div>
-        </div>
-        <button class="secondary" type="button" data-toggle-workflow-schedule="${schedule.id}">
-          ${schedule.enabled ? "Pause" : "Enable"}
-        </button>
-      </div>
-    `)
-    .join("");
-
-  document.querySelectorAll("[data-toggle-workflow-schedule]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      await api(`/api/workflow-schedules/${button.dataset.toggleWorkflowSchedule}/toggle`, { method: "POST" });
-      await loadState();
-    });
-  });
+  bindStarButtons(target);
 }
 
 function renderEvents() {
@@ -501,15 +670,14 @@ async function loadState() {
   try {
     const nextState = await api("/api/state");
     Object.assign(state, nextState);
-    el("apiStatus").textContent = `${state.nodes.length} nodes - ${state.buttons.length} buttons`;
+    el("apiStatus").textContent = `${state.nodes.length} nodes - ${actions().length} actions`;
     el("clock").textContent = state.timezone;
     updateSelectors();
-    renderDevices();
-    renderTimers();
+    renderActions();
     renderActiveJobs();
-    renderWorkflows();
-    renderWorkflowSchedules();
     renderSchedules();
+    renderSignalConfiguration();
+    renderWorkflows();
     renderEvents();
   } catch (error) {
     el("apiStatus").textContent = "Offline";
@@ -521,6 +689,21 @@ function formJson(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
 
+function activateTab(name, updateHash = true) {
+  const configuration = name === "configuration";
+  el("controlPanel").hidden = configuration;
+  el("configurationPanel").hidden = !configuration;
+  el("controlTab").classList.toggle("is-active", !configuration);
+  el("configurationTab").classList.toggle("is-active", configuration);
+  el("controlTab").setAttribute("aria-selected", String(!configuration));
+  el("configurationTab").setAttribute("aria-selected", String(configuration));
+  if (updateHash) history.replaceState(null, "", configuration ? "#configuration" : "#control");
+}
+
+document.querySelectorAll("[data-tab]").forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.tab));
+});
+
 el("refreshButton").addEventListener("click", loadState);
 el("addWorkflowStep").addEventListener("click", () => addWorkflowStepRow());
 el("cancelWorkflowEdit").addEventListener("click", resetWorkflowForm);
@@ -531,6 +714,7 @@ el("nodeForm").addEventListener("submit", async (event) => {
   try {
     await api("/api/nodes", { method: "POST", body: JSON.stringify(formJson(form)) });
     form.reset();
+    showToast("Node saved");
     await loadState();
   } catch (error) {
     showToast(error.message, true);
@@ -542,9 +726,22 @@ el("captureForm").addEventListener("submit", async (event) => {
   const form = event.currentTarget;
   const body = formJson(form);
   const timeoutMs = Number(body.timeout || 8) * 1000;
+  const submitButton = form.querySelector('button[type="submit"]');
+  const captureDeadline = Date.now() + timeoutMs;
+  const signalLabel = body.signal_type === "ir" ? "IR" : "RF";
+  const updateCaptureMessage = () => {
+    const secondsRemaining = Math.max(0, Math.ceil((captureDeadline - Date.now()) / 1000));
+    showToast(`Capturing ${signalLabel} signal - ${secondsRemaining > 0 ? `${secondsRemaining}s remaining` : "finishing"}`, false, 0);
+  };
+  let captureCountdown;
   try {
     if (!Number(body.node_id)) throw new Error("Add a node first");
-    showToast("Listening for signal");
+    submitButton.disabled = true;
+    submitButton.classList.add("is-loading");
+    submitButton.textContent = "Capturing...";
+    form.setAttribute("aria-busy", "true");
+    updateCaptureMessage();
+    captureCountdown = setInterval(updateCaptureMessage, 1000);
     const result = await api("/api/signals/learn", {
       method: "POST",
       body: JSON.stringify({
@@ -554,24 +751,53 @@ el("captureForm").addEventListener("submit", async (event) => {
         timeout_ms: timeoutMs,
       }),
     });
-    showToast(`Saved ${result.name}`);
-    form.reset();
+    clearInterval(captureCountdown);
+    if (result.duplicate) {
+      showToast(`Signal received. Already saved as ${result.existing.name}`);
+    } else {
+      showToast(`Signal received. Saved ${result.name}`);
+      form.reset();
+    }
     await loadState();
   } catch (error) {
-    showToast(error.message, true);
+    showToast(`Capture failed: ${error.message}`, true);
+  } finally {
+    clearInterval(captureCountdown);
+    submitButton.disabled = false;
+    submitButton.classList.remove("is-loading");
+    submitButton.textContent = "Capture and save";
+    form.removeAttribute("aria-busy");
   }
 });
 
 el("timerForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const body = formJson(form);
-  body.button_id = Number(body.button_id);
-  body.seconds = Number(body.seconds);
-  body.name = body.name || "Timer";
+  const data = new FormData(form);
   try {
-    await api("/api/timers", { method: "POST", body: JSON.stringify(body) });
+    const target = parseTarget(data.get("target"));
+    const useMobilePicker = window.matchMedia("(max-width: 620px)").matches;
+    const seconds = useMobilePicker
+      ? delayToSeconds(
+          Number(data.get("mobile_minutes")) * 60 + Number(data.get("mobile_seconds")),
+          1,
+        )
+      : delayToSeconds(data.get("minutes"), 60);
+    const selected = actions().find((action) => action.value === data.get("target"));
+    const name = `${selected?.name || "Action"} timer`;
+    if (target.kind === "signal") {
+      await api("/api/timers", {
+        method: "POST",
+        body: JSON.stringify({ button_id: target.id, seconds, name }),
+      });
+    } else {
+      await api(`/api/workflows/${target.id}/run`, {
+        method: "POST",
+        body: JSON.stringify({ delay_seconds: seconds, name }),
+      });
+    }
     form.reset();
+    showToast("Timer started");
     await loadState();
   } catch (error) {
     showToast(error.message, true);
@@ -582,22 +808,26 @@ el("workflowForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const rows = [...document.querySelectorAll(".workflow-step")];
-  const steps = rows.map((row) => {
-    const delay = Number(row.querySelector("input[name='delay']").value);
-    const unit = Number(row.querySelector("select[name='unit']").value);
-    const buttonId = Number(row.querySelector("select[name='button_id']").value);
-    return { button_id: buttonId, delay_seconds: delay * unit };
-  });
   try {
+    const steps = rows.map((row) => ({
+      button_id: Number(row.querySelector("select[name='button_id']").value),
+      delay_seconds: delayToSeconds(
+        row.querySelector("input[name='delay']").value,
+        Number(row.querySelector("select[name='unit']").value),
+        true,
+      ),
+    }));
     if (!steps.length || steps.some((step) => !step.button_id)) {
-      throw new Error("Add at least one workflow step with a button");
+      throw new Error("Add at least one workflow step with a signal");
     }
     const data = new FormData(form);
+    const wasEditing = editingWorkflowId !== null;
     await api(editingWorkflowId ? `/api/workflows/${editingWorkflowId}` : "/api/workflows", {
       method: editingWorkflowId ? "PUT" : "POST",
       body: JSON.stringify({ name: data.get("name") || "Workflow", steps }),
     });
     resetWorkflowForm();
+    showToast(wasEditing ? "Workflow updated" : "Workflow saved");
     await loadState();
   } catch (error) {
     showToast(error.message, true);
@@ -608,45 +838,37 @@ el("scheduleForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
-  const days = data.getAll("days").map(Number);
-  const body = {
-    button_id: Number(data.get("button_id")),
-    name: data.get("name") || "Schedule",
-    time_of_day: data.get("time_of_day"),
-    days,
-    enabled: true,
-  };
   try {
-    await api("/api/schedules", { method: "POST", body: JSON.stringify(body) });
+    const target = parseTarget(data.get("target"));
+    const selected = actions().find((action) => action.value === data.get("target"));
+    const shared = {
+      name: data.get("name") || `${selected?.name || "Action"} schedule`,
+      time_of_day: data.get("time_of_day"),
+      days: data.getAll("days").map(Number),
+      enabled: true,
+    };
+    if (!shared.days.length) throw new Error("Choose at least one day");
+    if (target.kind === "signal") {
+      await api("/api/schedules", {
+        method: "POST",
+        body: JSON.stringify({ ...shared, button_id: target.id }),
+      });
+    } else {
+      await api("/api/workflow-schedules", {
+        method: "POST",
+        body: JSON.stringify({ ...shared, workflow_id: target.id }),
+      });
+    }
     form.reset();
+    showToast("Schedule saved");
     await loadState();
   } catch (error) {
     showToast(error.message, true);
   }
 });
 
-el("workflowScheduleForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = new FormData(form);
-  const days = data.getAll("days").map(Number);
-  const body = {
-    workflow_id: Number(data.get("workflow_id")),
-    name: data.get("name") || "Workflow schedule",
-    time_of_day: data.get("time_of_day"),
-    days,
-    enabled: true,
-  };
-  try {
-    if (!body.workflow_id) throw new Error("Create a workflow first");
-    await api("/api/workflow-schedules", { method: "POST", body: JSON.stringify(body) });
-    form.reset();
-    await loadState();
-  } catch (error) {
-    showToast(error.message, true);
-  }
-});
-
+activateTab(location.hash === "#configuration" ? "configuration" : "control", false);
+setupTimerDurationPicker();
 addWorkflowStepRow();
 loadState();
 setInterval(loadState, 5000);
