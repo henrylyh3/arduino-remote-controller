@@ -147,6 +147,7 @@ The dashboard has two tabs:
 - `Configuration`: add nodes, learn/rename/delete signals, and create/edit workflows.
 
 Signals and workflows are both actions. The same timer and schedule forms can target either one; only workflows contain multiple steps.
+The node list under `Configuration` supports renaming, guarded deletion, and desktop drag-and-drop ordering. The drag grip is hidden on mobile. Node order is shared by Configuration and Control signal tabs.
 Star signals and workflows under `Configuration` to choose which action tiles appear under `Control`. Starred workflows appear first; starred signals are grouped into node tabs below them. Configuration signals are also grouped by node. Timer and schedule selectors still include all configured actions.
 Desktop timer delays are entered in minutes and accept positive decimals. On mobile, use the native minute and second selectors. Timer names are generated from the selected action. Workflow minute/hour delays also accept decimals; for example, `0.1` minute is stored as `6` seconds. Use `0` on a workflow step for no delay.
 

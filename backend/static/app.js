@@ -17,6 +17,7 @@ const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 let editingWorkflowId = null;
 let selectedActionNodeId = null;
 let selectedConfigNodeId = null;
+let draggedNodeId = null;
 
 const el = (id) => document.getElementById(id);
 
@@ -27,6 +28,14 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function actionIcon(name) {
+  const paths = {
+    pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.623l4.352-1.321a2 2 0 0 0 .83-.5z"></path><path d="m15 5 4 4"></path>',
+    trash: '<path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M10 11v6"></path><path d="M14 11v6"></path>',
+  };
+  return `<svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[name]}</svg>`;
 }
 
 function showToast(message, isError = false, durationMs = 3200) {
@@ -328,6 +337,126 @@ function bindStarButtons(container) {
   });
 }
 
+async function saveNodeOrder(nodeIds) {
+  await api("/api/nodes/order", {
+    method: "PUT",
+    body: JSON.stringify({ node_ids: nodeIds }),
+  });
+  await loadState();
+}
+
+function renderNodeConfiguration() {
+  const target = el("nodeList");
+  if (document.activeElement?.matches("#nodeList input") || draggedNodeId !== null) return;
+  if (!state.nodes.length) {
+    target.innerHTML = '<div class="empty">No nodes.</div>';
+    return;
+  }
+
+  target.innerHTML = state.nodes
+    .map((node) => {
+      const signalCount = state.buttons.filter((button) => buttonContext(button).node?.id === node.id).length;
+      return `
+        <div class="node-config-row" draggable="true" data-node-row="${node.id}">
+          <span class="drag-handle" draggable="true" aria-hidden="true" title="Drag to reorder">&#8942;&#8942;</span>
+          <div class="node-config-fields">
+            <input
+              id="node-name-${node.id}"
+              aria-label="Node name"
+              value="${escapeHtml(node.name)}"
+              data-original-name="${escapeHtml(node.name)}"
+              maxlength="80"
+              autocomplete="off"
+              draggable="false"
+            />
+            <span class="muted">${escapeHtml(node.base_url.replace(/^https?:\/\//, ""))} - ${signalCount} signal${signalCount === 1 ? "" : "s"}</span>
+          </div>
+          <div class="row-actions node-row-actions">
+            <button class="secondary" type="button" data-save-node="${node.id}" hidden>Save</button>
+            <button class="danger icon-button" type="button" data-delete-node="${node.id}" aria-label="Delete ${escapeHtml(node.name)}" title="Delete node">${actionIcon("trash")}</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  target.querySelectorAll("input[data-original-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const id = input.id.replace("node-name-", "");
+      target.querySelector(`[data-save-node="${id}"]`).hidden = input.value.trim() === input.dataset.originalName;
+    });
+  });
+
+  target.querySelectorAll("[data-save-node]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = Number(button.dataset.saveNode);
+      const name = el(`node-name-${id}`).value.trim();
+      try {
+        if (!name) throw new Error("Node name is required");
+        await api(`/api/nodes/${id}`, { method: "PUT", body: JSON.stringify({ name }) });
+        showToast("Node updated");
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+  });
+
+  target.querySelectorAll("[data-delete-node]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = Number(button.dataset.deleteNode);
+      const node = state.nodes.find((item) => item.id === id);
+      const signalCount = state.buttons.filter((item) => buttonContext(item).node?.id === id).length;
+      if (!window.confirm(`Delete node "${node?.name || "Unknown"}" and its ${signalCount} signal${signalCount === 1 ? "" : "s"}?`)) return;
+      try {
+        await api(`/api/nodes/${id}`, { method: "DELETE" });
+        showToast("Node deleted");
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+  });
+
+  target.querySelectorAll("[data-node-row]").forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      draggedNodeId = Number(row.dataset.nodeRow);
+      row.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(draggedNodeId));
+    });
+    row.addEventListener("dragover", (event) => {
+      if (draggedNodeId === null || draggedNodeId === Number(row.dataset.nodeRow)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      row.classList.add("is-drop-target");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"));
+    row.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      const targetId = Number(row.dataset.nodeRow);
+      if (draggedNodeId === null || draggedNodeId === targetId) return;
+      const movedNodeId = draggedNodeId;
+      const nodeIds = state.nodes.map((node) => node.id).filter((id) => id !== movedNodeId);
+      const targetIndex = nodeIds.indexOf(targetId);
+      const insertAfter = event.clientY > row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      nodeIds.splice(targetIndex + (insertAfter ? 1 : 0), 0, movedNodeId);
+      draggedNodeId = null;
+      try {
+        await saveNodeOrder(nodeIds);
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+    row.addEventListener("dragend", () => {
+      draggedNodeId = null;
+      target.querySelectorAll(".is-dragging, .is-drop-target").forEach((item) => {
+        item.classList.remove("is-dragging", "is-drop-target");
+      });
+    });
+  });
+}
+
 function runProgress(runId) {
   const steps = state.workflow_run_steps.filter((step) => step.run_id === runId);
   const completed = steps.filter((step) => step.status === "done").length;
@@ -489,7 +618,7 @@ function renderSignalConfiguration() {
           <div class="row-actions">
             ${starButton("signal", button.id, button.starred)}
             <button class="secondary" type="button" data-save-signal="${button.id}" hidden>Save</button>
-            <button class="danger" type="button" data-delete-signal="${button.id}">Delete</button>
+            <button class="danger icon-button" type="button" data-delete-signal="${button.id}" aria-label="Delete ${escapeHtml(button.name)}" title="Delete signal">${actionIcon("trash")}</button>
           </div>
         </div>
       `;
@@ -561,7 +690,7 @@ function addWorkflowStepRow(delay = 30, unit = 60, buttonId = "") {
       <option value="3600"${unit === 3600 ? " selected" : ""}>hours</option>
     </select>
     <select name="button_id" aria-label="Signal" required></select>
-    <button class="secondary" type="button" data-remove-step>Remove</button>
+    <button class="secondary icon-button" type="button" data-remove-step aria-label="Remove workflow step" title="Remove step">${actionIcon("trash")}</button>
   `;
   el("workflowSteps").appendChild(row);
   syncWorkflowStepOptions();
@@ -635,7 +764,7 @@ function renderWorkflows() {
         </div>
         <div class="row-actions">
           ${starButton("workflow", workflow.id, workflow.starred)}
-          <button class="secondary" type="button" data-edit-workflow="${workflow.id}">Edit</button>
+          <button class="secondary icon-button" type="button" data-edit-workflow="${workflow.id}" aria-label="Edit ${escapeHtml(workflow.name)}" title="Edit workflow">${actionIcon("pencil")}</button>
         </div>
       </div>
     `)
@@ -676,6 +805,7 @@ async function loadState() {
     renderActions();
     renderActiveJobs();
     renderSchedules();
+    renderNodeConfiguration();
     renderSignalConfiguration();
     renderWorkflows();
     renderEvents();

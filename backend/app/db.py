@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     room TEXT NOT NULL DEFAULT '',
     base_url TEXT NOT NULL UNIQUE,
     enabled INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     last_seen TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -138,6 +139,11 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        node_columns = {row["name"] for row in conn.execute("PRAGMA table_info(nodes)")}
+        if "sort_order" not in node_columns:
+            conn.execute("ALTER TABLE nodes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+            for index, row in enumerate(conn.execute("SELECT id FROM nodes ORDER BY room, name, id")):
+                conn.execute("UPDATE nodes SET sort_order = ? WHERE id = ?", (index, row["id"]))
         for table in ("buttons", "workflows"):
             columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
             if "starred" not in columns:

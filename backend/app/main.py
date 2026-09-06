@@ -29,6 +29,14 @@ class NodeIn(BaseModel):
     enabled: bool = True
 
 
+class NodeUpdateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class NodeOrderIn(BaseModel):
+    node_ids: list[int] = Field(min_length=1)
+
+
 class DeviceIn(BaseModel):
     node_id: int
     name: str = Field(min_length=1, max_length=80)
@@ -604,7 +612,7 @@ def health() -> dict[str, Any]:
 
 @app.get("/api/state")
 def state() -> dict[str, Any]:
-    nodes = db.fetch_all("SELECT * FROM nodes ORDER BY room, name")
+    nodes = db.fetch_all("SELECT * FROM nodes ORDER BY sort_order, id")
     devices = db.fetch_all("SELECT * FROM devices ORDER BY room, name")
     buttons = db.fetch_all("SELECT * FROM buttons ORDER BY name")
     timers = db.fetch_all("SELECT * FROM timers ORDER BY created_at DESC LIMIT 50")
@@ -661,10 +669,81 @@ def state() -> dict[str, Any]:
 @app.post("/api/nodes")
 def create_node(node: NodeIn) -> dict[str, Any]:
     node_id = db.execute(
-        "INSERT INTO nodes (name, room, base_url, enabled) VALUES (?, ?, ?, ?)",
+        """
+        INSERT INTO nodes (name, room, base_url, enabled, sort_order)
+        VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM nodes))
+        """,
         (node.name.strip(), node.room.strip(), clean_base_url(node.base_url), int(node.enabled)),
     )
     return {"id": node_id}
+
+
+@app.put("/api/nodes/order")
+def reorder_nodes(order: NodeOrderIn) -> dict[str, Any]:
+    current_ids = {node["id"] for node in db.fetch_all("SELECT id FROM nodes")}
+    requested_ids = order.node_ids
+    if len(requested_ids) != len(set(requested_ids)) or set(requested_ids) != current_ids:
+        raise HTTPException(status_code=422, detail="node_ids must contain every node exactly once")
+    with db.connect() as conn:
+        conn.executemany(
+            "UPDATE nodes SET sort_order = ? WHERE id = ?",
+            [(index, node_id) for index, node_id in enumerate(requested_ids)],
+        )
+    return {"ok": True}
+
+
+@app.put("/api/nodes/{node_id}")
+def update_node(node_id: int, node: NodeUpdateIn) -> dict[str, Any]:
+    if not db.fetch_one("SELECT id FROM nodes WHERE id = ?", (node_id,)):
+        raise HTTPException(status_code=404, detail="Node not found")
+    name = node.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Node name is required")
+    db.execute("UPDATE nodes SET name = ? WHERE id = ?", (name, node_id))
+    return {"id": node_id, "name": name}
+
+
+@app.delete("/api/nodes/{node_id}")
+def delete_node(node_id: int) -> dict[str, Any]:
+    if not db.fetch_one("SELECT id FROM nodes WHERE id = ?", (node_id,)):
+        raise HTTPException(status_code=404, detail="Node not found")
+    workflows = db.fetch_all(
+        """
+        SELECT DISTINCT workflows.name
+        FROM workflow_steps
+        JOIN workflows ON workflows.id = workflow_steps.workflow_id
+        JOIN buttons ON buttons.id = workflow_steps.button_id
+        JOIN devices ON devices.id = buttons.device_id
+        WHERE devices.node_id = ?
+        ORDER BY workflows.name
+        """,
+        (node_id,),
+    )
+    if workflows:
+        names = ", ".join(workflow["name"] for workflow in workflows)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Node signals are used by workflow: {names}. Edit the workflow before deleting the node.",
+        )
+    active_run = db.fetch_one(
+        """
+        SELECT workflow_runs.name
+        FROM workflow_run_steps
+        JOIN workflow_runs ON workflow_runs.id = workflow_run_steps.run_id
+        JOIN buttons ON buttons.id = workflow_run_steps.button_id
+        JOIN devices ON devices.id = buttons.device_id
+        WHERE devices.node_id = ? AND workflow_runs.status IN ('pending', 'running')
+        LIMIT 1
+        """,
+        (node_id,),
+    )
+    if active_run:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Node is used by active workflow run: {active_run['name']}. Cancel it before deleting the node.",
+        )
+    db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+    return {"ok": True}
 
 
 @app.post("/api/nodes/{node_id}/ping")

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local RF/IR Controller</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260906-5" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260906-9" />
   </head>
   <body>
     <header class="topbar">
@@ -109,6 +109,10 @@
             </label>
             <button type="submit">Save node</button>
           </form>
+          <div class="node-management">
+            <h3>Nodes</h3>
+            <div id="nodeList" class="node-list"></div>
+          </div>
         </section>
 
         <section class="panel">
@@ -145,17 +149,18 @@
         <section class="panel span-full">
           <div class="section-head">
             <h2>Workflows</h2>
-            <button id="addWorkflowStep" class="secondary" type="button">Add step</button>
           </div>
           <form id="workflowForm" class="form">
-            <label>
-              Name
-              <input name="name" autocomplete="off" placeholder="Night routine" />
-            </label>
-            <div id="workflowSteps" class="workflow-steps"></div>
-            <div class="workflow-actions">
-              <button id="saveWorkflowButton" type="submit">Save workflow</button>
-              <button id="cancelWorkflowEdit" class="secondary" type="button" hidden>Cancel edit</button>
+            <div class="workflow-editor">
+              <input name="name" aria-label="Workflow name" autocomplete="off" placeholder="Workflow name" />
+              <div id="workflowSteps" class="workflow-steps"></div>
+            </div>
+            <div class="workflow-footer">
+              <button id="addWorkflowStep" class="secondary" type="button">Add step</button>
+              <div class="workflow-actions">
+                <button id="cancelWorkflowEdit" class="secondary" type="button" hidden>Cancel edit</button>
+                <button id="saveWorkflowButton" type="submit">Save workflow</button>
+              </div>
             </div>
           </form>
           <div id="workflowList" class="list"></div>
@@ -164,6 +169,6 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=20260906-5" type="module"></script>
+    <script src="/static/app.js?v=20260906-9" type="module"></script>
   </body>
 </html>
