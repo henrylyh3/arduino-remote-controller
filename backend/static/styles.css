@@ -268,6 +268,16 @@ label {
   max-width: 520px;
 }
 
+.capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capture-actions button {
+  flex: 1;
+}
+
 .timer-delay-mobile {
   display: none;
 }
@@ -307,6 +317,45 @@ label {
   display: grid;
   gap: 5px;
   min-width: 0;
+}
+
+.node-meta,
+.node-health {
+  display: flex;
+  align-items: center;
+}
+
+.node-meta {
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.node-health {
+  flex: 0 0 auto;
+}
+
+.node-status-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: #8a938c;
+}
+
+.node-health-online {
+  color: #237a45;
+}
+
+.node-health-online .node-status-dot {
+  background: #2e9b58;
+}
+
+.node-health-offline {
+  color: var(--bad);
+}
+
+.node-health-offline .node-status-dot {
+  background: var(--bad);
 }
 
 .drag-handle,
@@ -468,6 +517,9 @@ fieldset input {
 }
 
 .node-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   flex: 0 0 auto;
   min-height: 36px;
   border: 1px solid var(--line);
@@ -479,6 +531,14 @@ fieldset input {
 .node-tab:hover {
   background: #e2e8e3;
   color: var(--text);
+}
+
+.node-tab:disabled,
+.node-tab:disabled:hover {
+  background: #f1f4f1;
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .node-tab.is-active {
@@ -539,12 +599,209 @@ fieldset input {
   background: #244354;
 }
 
+.button-tile.ac-controller-tile {
+  border: 1px solid #0b6848;
+  background: #0f7a54;
+}
+
+.button-tile.ac-controller-tile:hover {
+  background: #0a6043;
+}
+
 .button-tile span {
   display: block;
   color: #c7d5cc;
   font-size: 11px;
   font-weight: 600;
   margin-top: 5px;
+}
+
+.ac-controller-dialog {
+  width: min(420px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(23, 32, 27, 0.28);
+}
+
+.ac-controller-dialog::backdrop {
+  background: rgba(20, 27, 23, 0.5);
+}
+
+.ac-controller-shell {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+}
+
+.ac-controller-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ac-controller-header h2,
+.ac-control-section h3,
+.ac-controller-header p {
+  margin: 0;
+}
+
+.ac-controller-header h2 {
+  font-size: 22px;
+}
+
+.ac-controller-header .icon-button {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.ac-display {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  min-height: 132px;
+  border: 1px solid #aab9ac;
+  border-radius: var(--radius);
+  background: #dfe9df;
+  color: #21372a;
+  padding: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-display > span {
+  align-self: start;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ac-display output {
+  grid-row: span 2;
+  font-size: 58px;
+  font-weight: 750;
+  line-height: 0.9;
+}
+
+.ac-display div {
+  color: #4f6355;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ac-control-section {
+  display: grid;
+  gap: 10px;
+}
+
+.ac-control-section h3 {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.temperature-control {
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.temperature-control button {
+  width: 48px;
+  min-width: 48px;
+  padding: 0;
+  font-size: 24px;
+}
+
+.temperature-control strong {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-segmented {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--line);
+}
+
+.ac-segmented button {
+  border-radius: 0;
+  background: #f2f5f2;
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.ac-segmented button:hover {
+  background: #e1e8e2;
+}
+
+.ac-segmented button.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.ac-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  color: var(--text);
+}
+
+.ac-switch-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.ac-switch-row small {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.ac-switch-row input {
+  width: 42px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+.ac-power-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  background: #a12727;
+}
+
+.ac-power-button:hover {
+  background: #7f1f1f;
+}
+
+.power-symbol {
+  font-size: 20px;
+}
+
+.ac-last-sent {
+  min-height: 34px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.ac-controller-dialog[aria-busy="true"] {
+  cursor: wait;
 }
 
 .list {
@@ -696,6 +953,30 @@ fieldset input {
 
   .panel {
     padding: 14px;
+  }
+
+  .ac-controller-dialog {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 12px);
+    margin: auto 0 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .ac-controller-shell {
+    gap: 15px;
+    padding: 18px 16px max(18px, env(safe-area-inset-bottom));
+  }
+
+  .ac-display {
+    min-height: 112px;
+  }
+
+  .ac-display output {
+    font-size: 50px;
   }
 
   .timer-delay-desktop {

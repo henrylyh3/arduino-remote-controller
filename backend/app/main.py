@@ -20,6 +20,10 @@ from . import db
 
 APP_TIMEZONE = ZoneInfo(os.environ.get("APP_TIMEZONE", "Asia/Kuala_Lumpur"))
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
+NODE_HEALTH_INTERVAL_SECONDS = 15
+NODE_HEALTH_TIMEOUT_SECONDS = 2
+node_health_cache: dict[int, dict[str, Any]] = {}
+active_capture_cancellations: dict[int, asyncio.Event] = {}
 
 
 class NodeIn(BaseModel):
@@ -57,6 +61,20 @@ class LearnSignalIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     signal_type: Literal["rf", "ir"]
     timeout_ms: int = Field(default=8000, ge=1000, le=30000)
+
+
+class CapturedSignalIn(BaseModel):
+    node_id: int
+    name: str = Field(min_length=1, max_length=80)
+    signal_type: Literal["rf", "ir"]
+    payload: dict[str, Any]
+
+
+class AcControllerCommandIn(BaseModel):
+    temperature: int = Field(ge=16, le=30)
+    fan: Literal["auto", "1", "2", "3"]
+    swing: bool
+    power_toggle: bool = False
 
 
 class SignalUpdateIn(BaseModel):
@@ -108,6 +126,10 @@ class CommandError(RuntimeError):
     pass
 
 
+class CaptureCancelled(RuntimeError):
+    pass
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -134,6 +156,35 @@ def json_dumps(value: Any) -> str:
 
 def json_loads(value: str) -> Any:
     return json.loads(value)
+
+
+def uint8_to_bcd(value: int) -> int:
+    return ((value // 10) << 4) | (value % 10)
+
+
+def daikin64_payload(command: AcControllerCommandIn, now: datetime | None = None) -> dict[str, Any]:
+    local_time = (now or local_now()).astimezone(APP_TIMEZONE)
+    fan_codes = {"auto": 0x1, "1": 0x8, "2": 0x4, "3": 0x2}
+    flags = 0x04 | int(command.swing) | (0x08 if command.power_toggle else 0)
+    state = [
+        0x16,
+        (fan_codes[command.fan] << 4) | 0x02,
+        uint8_to_bcd(local_time.minute),
+        uint8_to_bcd(local_time.hour),
+        0x10,
+        0x10,
+        uint8_to_bcd(command.temperature),
+        flags,
+    ]
+    checksum = sum((byte & 0x0F) + (byte >> 4) for byte in state[:7]) + flags
+    state[7] = ((checksum & 0x0F) << 4) | flags
+
+    raw = [9800, 9800, 9800, 9800, 4600, 2500]
+    for byte in state:
+        for bit in range(8):
+            raw.extend((350, 954 if byte & (1 << bit) else 382))
+    raw.extend((350, 20300, 4600))
+    return {"raw": raw, "khz": 38, "repeat": 1, "state": state}
 
 
 def normalize_schedule(time_of_day: str, days: list[int]) -> tuple[str, list[int]]:
@@ -324,6 +375,75 @@ async def send_button_to_node(button_id: int) -> dict[str, Any]:
         (button_id, "sent", message),
     )
     return {"ok": True, "message": message}
+
+
+async def send_ac_controller_command(
+    controller_id: int,
+    command: AcControllerCommandIn,
+) -> dict[str, Any]:
+    controller = db.fetch_one(
+        """
+        SELECT ac_controllers.*, nodes.base_url AS node_base_url,
+               nodes.enabled AS node_enabled, nodes.name AS node_name
+        FROM ac_controllers
+        JOIN nodes ON nodes.id = ac_controllers.node_id
+        WHERE ac_controllers.id = ?
+        """,
+        (controller_id,),
+    )
+    if not controller:
+        raise HTTPException(status_code=404, detail="Aircond controller not found")
+    if not controller["node_enabled"]:
+        raise CommandError("Node is disabled")
+
+    payload = daikin64_payload(command)
+    raw, khz, repeat = validate_ir_payload(payload)
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            response = await client.post(
+                f"{clean_base_url(controller['node_base_url'])}/send/ir/raw",
+                params={"khz": khz, "repeat": repeat},
+                content=",".join(str(item) for item in raw),
+                headers={"content-type": "text/plain"},
+            )
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise CommandError(
+            f"Node returned HTTP {exc.response.status_code}: {exc.response.text[:160]}"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise CommandError(f"Node request failed: {exc}") from exc
+
+    settings = (
+        f"{command.temperature} C, Fan {command.fan.title()}, "
+        f"Swing {'on' if command.swing else 'off'}"
+    )
+    last_command = f"Power toggle - {settings}" if command.power_toggle else settings
+    sent_at = utc_stamp()
+    db.execute(
+        """
+        UPDATE ac_controllers
+        SET temperature = ?, fan = ?, swing = ?, last_command = ?, last_sent_at = ?
+        WHERE id = ?
+        """,
+        (
+            command.temperature,
+            command.fan,
+            int(command.swing),
+            last_command,
+            sent_at,
+            controller_id,
+        ),
+    )
+    message = f"Aircond controller sent {last_command} to {controller['node_name']}"
+    db.execute(
+        "INSERT INTO events (button_id, status, message) VALUES (NULL, ?, ?)",
+        ("sent", message),
+    )
+    updated = db.fetch_one("SELECT * FROM ac_controllers WHERE id = ?", (controller_id,))
+    if updated:
+        updated["swing"] = bool(updated["swing"])
+    return {"ok": True, "message": message, "controller": updated}
 
 
 def create_workflow_run_record(
@@ -583,18 +703,54 @@ async def scheduler_loop() -> None:
         await asyncio.sleep(1)
 
 
+async def probe_node_health(node: dict[str, Any], client: httpx.AsyncClient) -> dict[str, Any]:
+    checked_at = utc_stamp()
+    if not node["enabled"]:
+        return {"status": "disabled", "checked_at": checked_at, "latency_ms": None}
+
+    started_at = asyncio.get_running_loop().time()
+    try:
+        response = await client.get(f"{clean_base_url(node['base_url'])}/health")
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        return {
+            "status": "offline",
+            "checked_at": checked_at,
+            "latency_ms": None,
+            "error": str(exc) or type(exc).__name__,
+        }
+
+    latency_ms = round((asyncio.get_running_loop().time() - started_at) * 1000)
+    return {"status": "online", "checked_at": checked_at, "latency_ms": latency_ms}
+
+
+async def refresh_node_health(client: httpx.AsyncClient) -> None:
+    global node_health_cache
+    nodes = db.fetch_all("SELECT id, base_url, enabled FROM nodes ORDER BY id")
+    results = await asyncio.gather(*(probe_node_health(node, client) for node in nodes))
+    node_health_cache = {node["id"]: result for node, result in zip(nodes, results)}
+
+
+async def node_health_loop() -> None:
+    async with httpx.AsyncClient(timeout=NODE_HEALTH_TIMEOUT_SECONDS) as client:
+        while True:
+            try:
+                await refresh_node_health(client)
+            except Exception as exc:
+                print(f"node health error: {exc}", flush=True)
+            await asyncio.sleep(NODE_HEALTH_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
-    task = asyncio.create_task(scheduler_loop())
+    tasks = [asyncio.create_task(scheduler_loop()), asyncio.create_task(node_health_loop())]
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 app = FastAPI(title="Local RF/IR Controller", lifespan=lifespan)
@@ -615,6 +771,7 @@ def state() -> dict[str, Any]:
     nodes = db.fetch_all("SELECT * FROM nodes ORDER BY sort_order, id")
     devices = db.fetch_all("SELECT * FROM devices ORDER BY room, name")
     buttons = db.fetch_all("SELECT * FROM buttons ORDER BY name")
+    ac_controllers = db.fetch_all("SELECT * FROM ac_controllers ORDER BY id")
     timers = db.fetch_all("SELECT * FROM timers ORDER BY created_at DESC LIMIT 50")
     schedules = db.fetch_all("SELECT * FROM schedules ORDER BY time_of_day, name")
     workflows = db.fetch_all("SELECT * FROM workflows ORDER BY created_at DESC")
@@ -642,6 +799,10 @@ def state() -> dict[str, Any]:
         button["stats"] = stats.get(button["id"], {"press_count": 0, "last_pressed": None})
     for node in nodes:
         node["enabled"] = bool(node["enabled"])
+        node["health"] = node_health_cache.get(
+            node["id"],
+            {"status": "unknown", "checked_at": None, "latency_ms": None},
+        )
     for schedule in schedules:
         schedule["enabled"] = bool(schedule["enabled"])
         schedule["days"] = [int(day) for day in schedule["days"].split(",") if day != ""]
@@ -650,10 +811,13 @@ def state() -> dict[str, Any]:
         schedule["days"] = [int(day) for day in schedule["days"].split(",") if day != ""]
     for workflow in workflows:
         workflow["starred"] = bool(workflow["starred"])
+    for controller in ac_controllers:
+        controller["swing"] = bool(controller["swing"])
     return {
         "nodes": nodes,
         "devices": devices,
         "buttons": buttons,
+        "ac_controllers": ac_controllers,
         "timers": timers,
         "schedules": schedules,
         "workflows": workflows,
@@ -675,6 +839,8 @@ def create_node(node: NodeIn) -> dict[str, Any]:
         """,
         (node.name.strip(), node.room.strip(), clean_base_url(node.base_url), int(node.enabled)),
     )
+    if node.name.strip().lower() == "bedroom":
+        db.execute("INSERT OR IGNORE INTO ac_controllers (node_id) VALUES (?)", (node_id,))
     return {"id": node_id}
 
 
@@ -762,6 +928,14 @@ async def ping_node(node_id: int) -> dict[str, Any]:
     return {"ok": True, "node": data}
 
 
+@app.post("/api/node-health/refresh")
+async def refresh_all_node_health() -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=NODE_HEALTH_TIMEOUT_SECONDS) as client:
+        await refresh_node_health(client)
+    online = sum(health["status"] == "online" for health in node_health_cache.values())
+    return {"ok": True, "online": online, "total": len(node_health_cache)}
+
+
 @app.post("/api/devices")
 def create_device(device: DeviceIn) -> dict[str, Any]:
     if not db.fetch_one("SELECT id FROM nodes WHERE id = ?", (device.node_id,)):
@@ -800,20 +974,48 @@ async def press_button(button_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.post("/api/ac-controllers/{controller_id}/send")
+async def send_ac_controller(controller_id: int, command: AcControllerCommandIn) -> dict[str, Any]:
+    try:
+        return await send_ac_controller_command(controller_id, command)
+    except CommandError as exc:
+        db.execute(
+            "INSERT INTO events (button_id, status, message) VALUES (NULL, ?, ?)",
+            ("failed", f"Aircond controller failed: {exc}"),
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 async def capture_from_node(
     node_id: int,
     signal_type: Literal["rf", "ir"],
     timeout_ms: int,
+    cancel_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     node = db.fetch_one("SELECT * FROM nodes WHERE id = ?", (node_id,))
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
     try:
         async with httpx.AsyncClient(timeout=(timeout_ms / 1000) + 4) as client:
-            response = await client.get(
-                f"{clean_base_url(node['base_url'])}/capture/{signal_type}",
-                params={"timeout_ms": timeout_ms},
+            request_task = asyncio.create_task(
+                client.get(
+                    f"{clean_base_url(node['base_url'])}/capture/{signal_type}",
+                    params={"timeout_ms": timeout_ms},
+                )
             )
+            cancel_task = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+            if cancel_task:
+                done, _ = await asyncio.wait(
+                    {request_task, cancel_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if cancel_task in done:
+                    request_task.cancel()
+                    await asyncio.gather(request_task, return_exceptions=True)
+                    raise CaptureCancelled("Capture cancelled")
+                cancel_task.cancel()
+                await asyncio.gather(cancel_task, return_exceptions=True)
+            response = await request_task
             response.raise_for_status()
             payload = response.json()
     except httpx.HTTPStatusError as exc:
@@ -830,19 +1032,67 @@ async def capture_from_node(
     return normalized
 
 
+async def capture_with_cancellation(
+    node_id: int,
+    signal_type: Literal["rf", "ir"],
+    timeout_ms: int,
+) -> dict[str, Any]:
+    if node_id in active_capture_cancellations:
+        raise HTTPException(status_code=409, detail="A capture is already running for this node")
+    cancel_event = asyncio.Event()
+    active_capture_cancellations[node_id] = cancel_event
+    try:
+        return await capture_from_node(node_id, signal_type, timeout_ms, cancel_event)
+    except CaptureCancelled as exc:
+        raise HTTPException(status_code=409, detail="Capture cancelled") from exc
+    finally:
+        active_capture_cancellations.pop(node_id, None)
+
+
+@app.post("/api/nodes/{node_id}/cancel-capture")
+async def cancel_capture(node_id: int) -> dict[str, Any]:
+    cancel_event = active_capture_cancellations.get(node_id)
+    if not cancel_event:
+        return {"ok": True, "active": False}
+    cancel_event.set()
+    return {"ok": True, "active": True}
+
+
 @app.post("/api/nodes/{node_id}/capture/{signal_type}")
 async def capture_signal(
     node_id: int,
     signal_type: Literal["rf", "ir"],
     timeout_ms: int = Query(default=8000, ge=1000, le=30000),
 ) -> dict[str, Any]:
-    normalized = await capture_from_node(node_id, signal_type, timeout_ms)
-    return {"payload": normalized}
+    normalized = await capture_with_cancellation(node_id, signal_type, timeout_ms)
+    duplicate = find_duplicate_signal(node_id, signal_type, normalized)
+    return {"payload": normalized, "duplicate": bool(duplicate), "existing": duplicate}
+
+
+@app.post("/api/signals/save")
+def save_captured_signal(signal: CapturedSignalIn) -> dict[str, Any]:
+    if signal.signal_type == "rf":
+        normalized = validate_rf_payload(signal.payload)
+    else:
+        raw, khz, repeat = validate_ir_payload(signal.payload)
+        normalized = {"raw": raw, "khz": khz, "repeat": repeat}
+
+    duplicate = find_duplicate_signal(signal.node_id, signal.signal_type, normalized)
+    if duplicate:
+        return {"duplicate": True, "existing": duplicate}
+
+    device_id = ensure_signal_device(signal.node_id)
+    name = signal.name.strip()
+    button_id = db.execute(
+        "INSERT INTO buttons (device_id, name, signal_type, payload) VALUES (?, ?, ?, ?)",
+        (device_id, name, signal.signal_type, json_dumps(normalized)),
+    )
+    return {"duplicate": False, "id": button_id, "name": name}
 
 
 @app.post("/api/signals/learn")
 async def learn_signal(signal: LearnSignalIn) -> dict[str, Any]:
-    normalized = await capture_from_node(signal.node_id, signal.signal_type, signal.timeout_ms)
+    normalized = await capture_with_cancellation(signal.node_id, signal.signal_type, signal.timeout_ms)
     duplicate = find_duplicate_signal(signal.node_id, signal.signal_type, normalized)
     if duplicate:
         return {"duplicate": True, "existing": duplicate, "payload": normalized}
@@ -972,6 +1222,31 @@ def update_workflow(workflow_id: int, workflow: WorkflowIn) -> dict[str, Any]:
         )
 
     return {"id": workflow_id}
+
+
+@app.delete("/api/workflows/{workflow_id}")
+def delete_workflow(workflow_id: int) -> dict[str, Any]:
+    workflow = db.fetch_one("SELECT id, name FROM workflows WHERE id = ?", (workflow_id,))
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    active_run = db.fetch_one(
+        """
+        SELECT id
+        FROM workflow_runs
+        WHERE workflow_id = ? AND status IN ('pending', 'running')
+        LIMIT 1
+        """,
+        (workflow_id,),
+    )
+    if active_run:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Workflow {workflow['name']} has an active run. Cancel it before deleting the workflow.",
+        )
+
+    db.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
+    return {"ok": True}
 
 
 @app.post("/api/workflows/{workflow_id}/run")

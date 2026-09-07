@@ -196,6 +196,10 @@ void handleCaptureRF() {
   rfRx.resetAvailable();
 
   while (millis() - started < timeoutMs) {
+    if (!server.client().connected()) {
+      rfRx.resetAvailable();
+      return;
+    }
     if (rfRx.available()) {
       unsigned long code = rfRx.getReceivedValue();
       unsigned int bits = rfRx.getReceivedBitlength();
@@ -232,6 +236,10 @@ void handleCaptureIR() {
   irrecv.resume();
 
   while (millis() - started < timeoutMs) {
+    if (!server.client().connected()) {
+      irrecv.resume();
+      return;
+    }
     if (irrecv.decode(&irResults)) {
       String body = "{\"signal_type\":\"ir\",\"raw\":[";
       for (uint16_t i = 1; i < irResults.rawlen; i++) {

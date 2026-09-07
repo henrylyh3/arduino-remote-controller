@@ -141,13 +141,15 @@ APP_TIMEZONE=Asia/Kuala_Lumpur uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## Timers and workflows
 
-The dashboard has two tabs:
+The dashboard has three tabs:
 
-- `Control`: run saved signals or workflows, add timers, add schedules, view active jobs, and view the event log.
-- `Configuration`: add nodes, learn/rename/delete signals, and create/edit workflows.
+- `Control`: run saved signals or workflows, add timers, add schedules, and view active jobs.
+- `Configuration`: add nodes, learn/rename/delete signals, and create/edit/delete workflows.
+- `Log`: view the 10 most recent controller events.
 
 Signals and workflows are both actions. The same timer and schedule forms can target either one; only workflows contain multiple steps.
 The node list under `Configuration` supports renaming, guarded deletion, and desktop drag-and-drop ordering. The drag grip is hidden on mobile. Node order is shared by Configuration and Control signal tabs.
+Node health is checked by one lightweight backend loop every 15 seconds. Enabled nodes show green when their `/health` endpoint responds, red after a failed check, and grey before the first check or when disabled. Results are cached in memory, so opening more dashboards does not create more ESP32 health requests. Offline, disabled, and not-yet-checked node tabs remain visible under `Control`, but cannot be selected or used to send signals.
 Star signals and workflows under `Configuration` to choose which action tiles appear under `Control`. Starred workflows appear first; starred signals are grouped into node tabs below them. Configuration signals are also grouped by node. Timer and schedule selectors still include all configured actions.
 Desktop timer delays are entered in minutes and accept positive decimals. On mobile, use the native minute and second selectors. Timer names are generated from the selected action. Workflow minute/hour delays also accept decimals; for example, `0.1` minute is stored as `6` seconds. Use `0` on a workflow step for no delay.
 
@@ -197,6 +199,7 @@ signal: RF 433MHz
 When capture succeeds, the learned signal is saved as a dashboard action automatically. Name the signal with the device/action you want to recognise later, such as `Bedroom AC Cool 24` or `Living fan speed 2`. Rename or delete it under `Configuration` -> `Signals`. A signal used by a workflow cannot be deleted until it is removed from that workflow.
 
 If the same signal is captured again on the same ESP32 node, the dashboard shows the existing saved signal name and does not create a duplicate button. RF duplicates are matched by code, bit length, and protocol. IR raw duplicates allow small timing differences between captures.
+IR is the default signal type in the Learn signal form. While capture is running, use `Stop capture` to cancel it. Upload the current firmware so the ESP32 also exits its capture loop immediately when the backend closes the request.
 
 ## ESP32 setup
 

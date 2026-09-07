@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local RF/IR Controller</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260906-9" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260907-13" />
   </head>
   <body>
     <header class="topbar">
@@ -24,6 +24,9 @@
       </button>
       <button id="configurationTab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="configurationPanel" data-tab="configuration">
         Configuration
+      </button>
+      <button id="logTab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="logPanel" data-tab="log">
+        Log
       </button>
     </nav>
 
@@ -87,10 +90,6 @@
           <div id="scheduleList" class="list"></div>
         </section>
 
-        <section class="panel span-full">
-          <h2>Event log</h2>
-          <div id="eventList" class="list"></div>
-        </section>
       </main>
     </div>
 
@@ -118,26 +117,37 @@
         <section class="panel">
           <h2>Learn signal</h2>
           <form id="captureForm" class="form">
-            <label>
-              Name
-              <input name="name" required autocomplete="off" placeholder="Bedroom fan power" />
-            </label>
-            <label>
-              Node
-              <select name="node_id" id="captureNode" required></select>
-            </label>
-            <label>
-              Signal
-              <select name="signal_type" id="captureType" required>
-                <option value="rf">RF 433MHz</option>
-                <option value="ir">IR raw</option>
-              </select>
-            </label>
-            <label>
-              Timeout seconds
-              <input name="timeout" type="number" min="1" max="30" value="8" />
-            </label>
-            <button type="submit">Capture and save</button>
+            <div id="captureSetup" class="form">
+              <label>
+                Node
+                <select name="node_id" id="captureNode" required></select>
+              </label>
+              <label>
+                Signal
+                <select name="signal_type" id="captureType" required>
+                  <option value="ir">IR raw</option>
+                  <option value="rf">RF 433MHz</option>
+                </select>
+              </label>
+              <label>
+                Timeout seconds
+                <input name="timeout" type="number" min="1" max="30" value="8" />
+              </label>
+              <div class="capture-actions">
+                <button id="startCapture" type="button">Sense signal</button>
+                <button id="stopCapture" class="danger" type="button" hidden>Stop capture</button>
+              </div>
+            </div>
+            <div id="captureNaming" class="form" hidden>
+              <label>
+                Name
+                <input name="name" autocomplete="off" maxlength="80" placeholder="Bedroom fan power" />
+              </label>
+              <div class="capture-actions">
+                <button type="submit">Save signal</button>
+                <button id="discardCapture" class="secondary" type="button">Capture again</button>
+              </div>
+            </div>
           </form>
         </section>
 
@@ -168,7 +178,68 @@
       </main>
     </div>
 
+    <div id="logPanel" class="tab-panel" role="tabpanel" aria-labelledby="logTab" hidden>
+      <main class="layout">
+        <section class="panel span-full">
+          <h2>Event log</h2>
+          <div id="eventList" class="list"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="acControllerDialog" class="ac-controller-dialog" aria-labelledby="acControllerTitle">
+      <div class="ac-controller-shell">
+        <header class="ac-controller-header">
+          <div>
+            <p class="eyebrow">Bedroom</p>
+            <h2 id="acControllerTitle">Aircond controller</h2>
+          </div>
+          <button id="closeAcController" class="icon-button secondary" type="button" aria-label="Close aircond controller" title="Close">&times;</button>
+        </header>
+
+        <div class="ac-display" aria-live="polite">
+          <span>COOL</span>
+          <output id="acTemperatureDisplay">27&deg;</output>
+          <div id="acDisplaySummary">Fan 1 &middot; Swing off</div>
+        </div>
+
+        <section class="ac-control-section" aria-labelledby="acTemperatureLabel">
+          <h3 id="acTemperatureLabel">Temperature</h3>
+          <div class="temperature-control">
+            <button id="decreaseAcTemperature" class="secondary" type="button" aria-label="Decrease temperature">&minus;</button>
+            <strong id="acTemperatureValue">27&deg;C</strong>
+            <button id="increaseAcTemperature" class="secondary" type="button" aria-label="Increase temperature">+</button>
+          </div>
+        </section>
+
+        <section class="ac-control-section" aria-labelledby="acFanLabel">
+          <h3 id="acFanLabel">Fan</h3>
+          <div class="ac-segmented" role="group" aria-label="Fan speed">
+            <button type="button" data-ac-fan="auto">Auto</button>
+            <button type="button" data-ac-fan="1">1</button>
+            <button type="button" data-ac-fan="2">2</button>
+            <button type="button" data-ac-fan="3">3</button>
+          </div>
+        </section>
+
+        <label class="ac-switch-row" for="acSwing">
+          <span>
+            <strong>Swing</strong>
+            <small>Vertical airflow</small>
+          </span>
+          <input id="acSwing" type="checkbox" role="switch" />
+        </label>
+
+        <button id="acPower" class="ac-power-button" type="button">
+          <span class="power-symbol" aria-hidden="true">&#9211;</span>
+          Power toggle
+        </button>
+
+        <p id="acLastSent" class="ac-last-sent">No command sent yet</p>
+      </div>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=20260906-9" type="module"></script>
+    <script src="/static/app.js?v=20260907-18" type="module"></script>
   </body>
 </html>

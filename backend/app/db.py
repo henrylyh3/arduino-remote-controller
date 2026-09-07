@@ -118,6 +118,18 @@ CREATE TABLE IF NOT EXISTS workflow_run_steps (
     UNIQUE(run_id, step_order)
 );
 
+CREATE TABLE IF NOT EXISTS ac_controllers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id INTEGER NOT NULL UNIQUE REFERENCES nodes(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT 'Aircond controller',
+    temperature INTEGER NOT NULL DEFAULT 27 CHECK(temperature BETWEEN 16 AND 30),
+    fan TEXT NOT NULL DEFAULT '1' CHECK(fan IN ('auto', '1', '2', '3')),
+    swing INTEGER NOT NULL DEFAULT 0,
+    last_command TEXT,
+    last_sent_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     button_id INTEGER REFERENCES buttons(id) ON DELETE SET NULL,
@@ -149,6 +161,19 @@ def init_db() -> None:
             if "starred" not in columns:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
                 conn.execute(f"UPDATE {table} SET starred = 1")
+        conn.execute(
+            """
+            INSERT INTO ac_controllers (node_id)
+            SELECT nodes.id
+            FROM nodes
+            WHERE lower(trim(nodes.name)) = 'bedroom'
+              AND NOT EXISTS (
+                  SELECT 1 FROM ac_controllers WHERE ac_controllers.node_id = nodes.id
+              )
+            ORDER BY nodes.sort_order, nodes.id
+            LIMIT 1
+            """
+        )
 
 
 def fetch_all(query: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:

@@ -2,6 +2,7 @@ const state = {
   nodes: [],
   devices: [],
   buttons: [],
+  ac_controllers: [],
   timers: [],
   schedules: [],
   workflows: [],
@@ -18,6 +19,9 @@ let editingWorkflowId = null;
 let selectedActionNodeId = null;
 let selectedConfigNodeId = null;
 let draggedNodeId = null;
+let activeCapture = null;
+let pendingCapturedSignal = null;
+let activeAcControllerId = null;
 
 const el = (id) => document.getElementById(id);
 
@@ -110,19 +114,33 @@ function groupSignalsByNode(buttons) {
     .filter((group) => group.buttons.length);
 }
 
-function nodeTabs(groups, selectedNodeId, dataAttribute, label) {
+function controlSignalGroups(buttons) {
+  return state.nodes
+    .map((node) => ({
+      node,
+      buttons: buttons.filter((button) => buttonContext(button).node?.id === node.id),
+      controller: state.ac_controllers.find((item) => item.node_id === node.id) || null,
+    }))
+    .filter((group) => group.buttons.length || group.controller);
+}
+
+function nodeTabs(groups, selectedNodeId, dataAttribute, label, disableInactive = false) {
   return `
     <div class="node-tabs" role="tablist" aria-label="${label}">
       ${groups
-        .map((group) => `
-          <button
-            class="node-tab${group.node.id === selectedNodeId ? " is-active" : ""}"
-            type="button"
-            role="tab"
-            aria-selected="${group.node.id === selectedNodeId}"
-            ${dataAttribute}="${group.node.id}"
-          >${escapeHtml(group.node.name)}</button>
-        `)
+        .map((group) => {
+          const disabled = disableInactive && group.node.health?.status !== "online";
+          return `
+            <button
+              class="node-tab${group.node.id === selectedNodeId ? " is-active" : ""}"
+              type="button"
+              role="tab"
+              aria-selected="${group.node.id === selectedNodeId}"
+              ${dataAttribute}="${group.node.id}"
+              ${disabled ? "disabled" : ""}
+            >${nodeHealthView(group.node)}<span>${escapeHtml(group.node.name)}</span></button>
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -184,16 +202,17 @@ function renderActions() {
   const grid = el("actionGrid");
   const starredWorkflows = state.workflows.filter((workflow) => workflow.starred);
   const starredSignals = state.buttons.filter((button) => button.starred);
-  const signalGroups = groupSignalsByNode(starredSignals);
-  if (!starredWorkflows.length && !starredSignals.length) {
+  const signalGroups = controlSignalGroups(starredSignals);
+  if (!starredWorkflows.length && !signalGroups.length) {
     grid.innerHTML = '<div class="empty">No starred actions. Star one under Configuration.</div>';
     return;
   }
 
-  if (!signalGroups.some((group) => group.node.id === selectedActionNodeId)) {
-    selectedActionNodeId = signalGroups[0]?.node.id || null;
+  const onlineSignalGroups = signalGroups.filter((group) => group.node.health?.status === "online");
+  if (!onlineSignalGroups.some((group) => group.node.id === selectedActionNodeId)) {
+    selectedActionNodeId = onlineSignalGroups[0]?.node.id || null;
   }
-  const selectedGroup = signalGroups.find((group) => group.node.id === selectedActionNodeId);
+  const selectedGroup = onlineSignalGroups.find((group) => group.node.id === selectedActionNodeId);
   const workflowHtml = starredWorkflows.length
     ? `
       <section class="action-section">
@@ -218,10 +237,16 @@ function renderActions() {
     ? `
       <section class="action-section">
         <h3>Signals</h3>
-        ${nodeTabs(signalGroups, selectedActionNodeId, "data-action-node-tab", "Signal nodes")}
+        ${nodeTabs(signalGroups, selectedActionNodeId, "data-action-node-tab", "Signal nodes", true)}
         <div class="action-tile-grid node-tab-content" role="tabpanel">
-          ${selectedGroup.buttons
-            .map((button) => {
+          ${selectedGroup ? `
+            ${selectedGroup.controller ? `
+              <button class="button-tile ac-controller-tile" type="button" data-ac-controller-id="${selectedGroup.controller.id}">
+                ${escapeHtml(selectedGroup.controller.name)}
+                <span>${selectedGroup.controller.temperature}&deg;C &middot; Fan ${escapeHtml(selectedGroup.controller.fan === "auto" ? "Auto" : selectedGroup.controller.fan)} &middot; Swing ${selectedGroup.controller.swing ? "on" : "off"}</span>
+              </button>
+            ` : ""}
+            ${selectedGroup.buttons.map((button) => {
               const count = button.stats?.press_count || 0;
               return `
                 <button class="button-tile" type="button" data-action-kind="signal" data-action-id="${button.id}">
@@ -231,6 +256,7 @@ function renderActions() {
               `;
             })
             .join("")}
+          ` : '<div class="empty">No online signal nodes.</div>'}
         </div>
       </section>
     `
@@ -242,6 +268,10 @@ function renderActions() {
       selectedActionNodeId = Number(button.dataset.actionNodeTab);
       renderActions();
     });
+  });
+
+  grid.querySelectorAll("[data-ac-controller-id]").forEach((button) => {
+    button.addEventListener("click", () => openAcController(Number(button.dataset.acControllerId)));
   });
 
   grid.querySelectorAll("[data-action-kind]").forEach((button) => {
@@ -258,6 +288,77 @@ function renderActions() {
       }
     });
   });
+}
+
+function activeAcController() {
+  return state.ac_controllers.find((controller) => controller.id === activeAcControllerId) || null;
+}
+
+function fanLabel(fan) {
+  return fan === "auto" ? "Auto" : fan;
+}
+
+function renderAcController() {
+  const controller = activeAcController();
+  if (!controller) return;
+  el("acTemperatureDisplay").innerHTML = `${controller.temperature}&deg;`;
+  el("acTemperatureValue").innerHTML = `${controller.temperature}&deg;C`;
+  el("acDisplaySummary").textContent = `Fan ${fanLabel(controller.fan)} · Swing ${controller.swing ? "on" : "off"}`;
+  el("decreaseAcTemperature").disabled = controller.temperature <= 16;
+  el("increaseAcTemperature").disabled = controller.temperature >= 30;
+  el("acSwing").checked = controller.swing;
+  document.querySelectorAll("[data-ac-fan]").forEach((button) => {
+    const selected = button.dataset.acFan === controller.fan;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  el("acLastSent").textContent = controller.last_sent_at
+    ? `Last sent: ${controller.last_command} · ${new Date(controller.last_sent_at).toLocaleString()}`
+    : "No command sent yet";
+}
+
+function openAcController(controllerId) {
+  activeAcControllerId = controllerId;
+  renderAcController();
+  el("acControllerDialog").showModal();
+}
+
+function setAcControllerBusy(busy) {
+  const dialog = el("acControllerDialog");
+  dialog.setAttribute("aria-busy", String(busy));
+  dialog.querySelectorAll("button, input").forEach((control) => {
+    control.disabled = busy;
+  });
+  if (!busy) renderAcController();
+}
+
+async function sendAcController(changes = {}, powerToggle = false) {
+  const controller = activeAcController();
+  if (!controller) return;
+  const command = {
+    temperature: controller.temperature,
+    fan: controller.fan,
+    swing: controller.swing,
+    ...changes,
+    power_toggle: powerToggle,
+  };
+  setAcControllerBusy(true);
+  try {
+    const result = await api(`/api/ac-controllers/${controller.id}/send`, {
+      method: "POST",
+      body: JSON.stringify(command),
+    });
+    const index = state.ac_controllers.findIndex((item) => item.id === controller.id);
+    state.ac_controllers[index] = result.controller;
+    renderAcController();
+    renderActions();
+    showToast(result.message);
+  } catch (error) {
+    renderAcController();
+    showToast(error.message, true);
+  } finally {
+    setAcControllerBusy(false);
+  }
 }
 
 function daysLabel(days) {
@@ -337,6 +438,24 @@ function bindStarButtons(container) {
   });
 }
 
+function nodeHealthView(node) {
+  const status = ["online", "offline", "disabled"].includes(node.health?.status)
+    ? node.health.status
+    : "unknown";
+  const labels = { online: "Online", offline: "Offline", disabled: "Disabled", unknown: "Checking" };
+  const details = [labels[status]];
+  if (node.health?.latency_ms !== null && node.health?.latency_ms !== undefined) {
+    details.push(`${node.health.latency_ms} ms`);
+  }
+  if (node.health?.checked_at) details.push(`checked ${node.health.checked_at}`);
+  if (node.health?.error) details.push(node.health.error);
+  return `
+    <span class="node-health node-health-${status}" aria-label="Node ${labels[status]}" title="${escapeHtml(details.join(" - "))}">
+      <span class="node-status-dot" aria-hidden="true"></span>
+    </span>
+  `;
+}
+
 async function saveNodeOrder(nodeIds) {
   await api("/api/nodes/order", {
     method: "PUT",
@@ -369,7 +488,10 @@ function renderNodeConfiguration() {
               autocomplete="off"
               draggable="false"
             />
-            <span class="muted">${escapeHtml(node.base_url.replace(/^https?:\/\//, ""))} - ${signalCount} signal${signalCount === 1 ? "" : "s"}</span>
+            <div class="node-meta">
+              <span class="muted">${escapeHtml(node.base_url.replace(/^https?:\/\//, ""))} - ${signalCount} signal${signalCount === 1 ? "" : "s"}</span>
+              ${nodeHealthView(node)}
+            </div>
           </div>
           <div class="row-actions node-row-actions">
             <button class="secondary" type="button" data-save-node="${node.id}" hidden>Save</button>
@@ -765,6 +887,7 @@ function renderWorkflows() {
         <div class="row-actions">
           ${starButton("workflow", workflow.id, workflow.starred)}
           <button class="secondary icon-button" type="button" data-edit-workflow="${workflow.id}" aria-label="Edit ${escapeHtml(workflow.name)}" title="Edit workflow">${actionIcon("pencil")}</button>
+          <button class="danger icon-button" type="button" data-delete-workflow="${workflow.id}" aria-label="Delete ${escapeHtml(workflow.name)}" title="Delete workflow">${actionIcon("trash")}</button>
         </div>
       </div>
     `)
@@ -772,6 +895,21 @@ function renderWorkflows() {
 
   document.querySelectorAll("[data-edit-workflow]").forEach((button) => {
     button.addEventListener("click", () => editWorkflow(button.dataset.editWorkflow));
+  });
+  document.querySelectorAll("[data-delete-workflow]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = Number(button.dataset.deleteWorkflow);
+      const workflow = state.workflows.find((item) => item.id === id);
+      if (!window.confirm(`Delete workflow "${workflow?.name || "Unknown"}", its schedules, and run history?`)) return;
+      try {
+        await api(`/api/workflows/${id}`, { method: "DELETE" });
+        if (editingWorkflowId === id) resetWorkflowForm();
+        showToast("Workflow deleted");
+        await loadState();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
   });
   bindStarButtons(target);
 }
@@ -799,7 +937,7 @@ async function loadState() {
   try {
     const nextState = await api("/api/state");
     Object.assign(state, nextState);
-    el("apiStatus").textContent = `${state.nodes.length} nodes - ${actions().length} actions`;
+    el("apiStatus").textContent = `${state.nodes.length} nodes - ${actions().length + state.ac_controllers.length} actions`;
     el("clock").textContent = state.timezone;
     updateSelectors();
     renderActions();
@@ -820,23 +958,91 @@ function formJson(form) {
 }
 
 function activateTab(name, updateHash = true) {
-  const configuration = name === "configuration";
-  el("controlPanel").hidden = configuration;
-  el("configurationPanel").hidden = !configuration;
-  el("controlTab").classList.toggle("is-active", !configuration);
-  el("configurationTab").classList.toggle("is-active", configuration);
-  el("controlTab").setAttribute("aria-selected", String(!configuration));
-  el("configurationTab").setAttribute("aria-selected", String(configuration));
-  if (updateHash) history.replaceState(null, "", configuration ? "#configuration" : "#control");
+  const tabs = ["control", "configuration", "log"];
+  const activeTab = tabs.includes(name) ? name : "control";
+  tabs.forEach((tabName) => {
+    const active = tabName === activeTab;
+    el(`${tabName}Panel`).hidden = !active;
+    el(`${tabName}Tab`).classList.toggle("is-active", active);
+    el(`${tabName}Tab`).setAttribute("aria-selected", String(active));
+  });
+  if (updateHash) history.replaceState(null, "", `#${activeTab}`);
 }
 
 document.querySelectorAll("[data-tab]").forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
 });
 
-el("refreshButton").addEventListener("click", loadState);
+el("closeAcController").addEventListener("click", () => el("acControllerDialog").close());
+el("acControllerDialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) event.currentTarget.close();
+});
+el("acControllerDialog").addEventListener("close", () => {
+  activeAcControllerId = null;
+});
+el("decreaseAcTemperature").addEventListener("click", () => {
+  const controller = activeAcController();
+  if (controller) sendAcController({ temperature: Math.max(16, controller.temperature - 1) });
+});
+el("increaseAcTemperature").addEventListener("click", () => {
+  const controller = activeAcController();
+  if (controller) sendAcController({ temperature: Math.min(30, controller.temperature + 1) });
+});
+document.querySelectorAll("[data-ac-fan]").forEach((button) => {
+  button.addEventListener("click", () => sendAcController({ fan: button.dataset.acFan }));
+});
+el("acSwing").addEventListener("change", (event) => {
+  sendAcController({ swing: event.currentTarget.checked });
+});
+el("acPower").addEventListener("click", () => sendAcController({}, true));
+
+el("refreshButton").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.classList.add("is-loading");
+  button.textContent = "Checking...";
+  try {
+    const result = await api("/api/node-health/refresh", { method: "POST" });
+    await loadState();
+    showToast(`${result.online} of ${result.total} nodes online`);
+  } catch (error) {
+    showToast(`Health check failed: ${error.message}`, true);
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-loading");
+    button.textContent = "Refresh";
+  }
+});
 el("addWorkflowStep").addEventListener("click", () => addWorkflowStepRow());
 el("cancelWorkflowEdit").addEventListener("click", resetWorkflowForm);
+
+el("stopCapture").addEventListener("click", async () => {
+  const capture = activeCapture;
+  if (!capture) return;
+  const stopButton = el("stopCapture");
+  capture.stopped = true;
+  stopButton.disabled = true;
+  stopButton.textContent = "Stopping...";
+  showToast("Stopping capture", false, 0);
+  try {
+    await api(`/api/nodes/${capture.nodeId}/cancel-capture`, { method: "POST" });
+    capture.controller.abort();
+  } catch (error) {
+    capture.stopped = false;
+    stopButton.disabled = false;
+    stopButton.textContent = "Stop capture";
+    showToast(`Unable to stop capture: ${error.message}`, true);
+  }
+});
+
+function resetCapturedSignal() {
+  pendingCapturedSignal = null;
+  el("captureForm").elements.name.value = "";
+  el("captureSetup").hidden = false;
+  el("captureNaming").hidden = true;
+}
+
+el("discardCapture").addEventListener("click", resetCapturedSignal);
 
 el("nodeForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -851,12 +1057,17 @@ el("nodeForm").addEventListener("submit", async (event) => {
   }
 });
 
-el("captureForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
+el("startCapture").addEventListener("click", async () => {
+  const form = el("captureForm");
   const body = formJson(form);
   const timeoutMs = Number(body.timeout || 8) * 1000;
-  const submitButton = form.querySelector('button[type="submit"]');
+  const captureButton = el("startCapture");
+  const stopButton = el("stopCapture");
+  const capture = {
+    nodeId: Number(body.node_id),
+    controller: new AbortController(),
+    stopped: false,
+  };
   const captureDeadline = Date.now() + timeoutMs;
   const signalLabel = body.signal_type === "ir" ? "IR" : "RF";
   const updateCaptureMessage = () => {
@@ -866,37 +1077,83 @@ el("captureForm").addEventListener("submit", async (event) => {
   let captureCountdown;
   try {
     if (!Number(body.node_id)) throw new Error("Add a node first");
-    submitButton.disabled = true;
-    submitButton.classList.add("is-loading");
-    submitButton.textContent = "Capturing...";
+    captureButton.disabled = true;
+    captureButton.classList.add("is-loading");
+    captureButton.textContent = "Sensing...";
+    stopButton.hidden = false;
+    stopButton.disabled = false;
+    activeCapture = capture;
     form.setAttribute("aria-busy", "true");
     updateCaptureMessage();
     captureCountdown = setInterval(updateCaptureMessage, 1000);
-    const result = await api("/api/signals/learn", {
+    const result = await api(
+      `/api/nodes/${Number(body.node_id)}/capture/${body.signal_type}?timeout_ms=${timeoutMs}`,
+      {
       method: "POST",
-      body: JSON.stringify({
-        node_id: Number(body.node_id),
-        name: body.name,
-        signal_type: body.signal_type,
-        timeout_ms: timeoutMs,
-      }),
-    });
+      signal: capture.controller.signal,
+      },
+    );
     clearInterval(captureCountdown);
     if (result.duplicate) {
       showToast(`Signal received. Already saved as ${result.existing.name}`);
     } else {
-      showToast(`Signal received. Saved ${result.name}`);
-      form.reset();
+      pendingCapturedSignal = {
+        node_id: Number(body.node_id),
+        signal_type: body.signal_type,
+        payload: result.payload,
+      };
+      el("captureSetup").hidden = true;
+      el("captureNaming").hidden = false;
+      form.elements.name.focus();
+      showToast("Signal detected. Give it a name");
     }
-    await loadState();
   } catch (error) {
-    showToast(`Capture failed: ${error.message}`, true);
+    if (capture.stopped || error.name === "AbortError") {
+      showToast("Capture stopped");
+    } else {
+      showToast(`Capture failed: ${error.message}`, true);
+    }
   } finally {
     clearInterval(captureCountdown);
-    submitButton.disabled = false;
-    submitButton.classList.remove("is-loading");
-    submitButton.textContent = "Capture and save";
+    captureButton.disabled = false;
+    captureButton.classList.remove("is-loading");
+    captureButton.textContent = "Sense signal";
+    stopButton.hidden = true;
+    stopButton.disabled = false;
+    stopButton.textContent = "Stop capture";
+    if (activeCapture === capture) activeCapture = null;
     form.removeAttribute("aria-busy");
+  }
+});
+
+el("captureForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!pendingCapturedSignal) return;
+  const form = event.currentTarget;
+  const name = form.elements.name.value.trim();
+  if (!name) {
+    form.elements.name.focus();
+    showToast("Enter a signal name", true);
+    return;
+  }
+  const saveButton = form.querySelector('#captureNaming button[type="submit"]');
+  try {
+    saveButton.disabled = true;
+    const result = await api("/api/signals/save", {
+      method: "POST",
+      body: JSON.stringify({ ...pendingCapturedSignal, name }),
+    });
+    if (result.duplicate) {
+      showToast(`Already saved as ${result.existing.name}`);
+    } else {
+      showToast(`Saved ${result.name}`);
+    }
+    resetCapturedSignal();
+    await loadState();
+  } catch (error) {
+    showToast(`Unable to save signal: ${error.message}`, true);
+  } finally {
+    saveButton.disabled = false;
   }
 });
 
@@ -997,7 +1254,7 @@ el("scheduleForm").addEventListener("submit", async (event) => {
   }
 });
 
-activateTab(location.hash === "#configuration" ? "configuration" : "control", false);
+activateTab(location.hash.slice(1), false);
 setupTimerDurationPicker();
 addWorkflowStepRow();
 loadState();
