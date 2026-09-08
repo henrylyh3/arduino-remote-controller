@@ -26,6 +26,7 @@ let pendingCapturedSignal = null;
 let activeAcControllerId = null;
 let editingSchedule = null;
 let editingTimerId = null;
+let workflowStepKey = 0;
 
 const el = (id) => document.getElementById(id);
 
@@ -424,13 +425,87 @@ function timerMinuteValues() {
   return values;
 }
 
+function rollerOption(value, format) {
+  const option = document.createElement("button");
+  option.className = "roller-option";
+  option.type = "button";
+  option.role = "option";
+  option.dataset.value = String(value);
+  option.textContent = format(value);
+  return option;
+}
+
+function selectRollerValue(rollerId, value, notify = false) {
+  const roller = el(rollerId);
+  let options = [...roller.querySelectorAll(".roller-option")];
+  let option = options.find((item) => Number(item.dataset.value) === Number(value));
+  if (!option) {
+    option = rollerOption(value, roller.valueFormatter || String);
+    const nextOption = options.find((item) => Number(item.dataset.value) > Number(value));
+    roller.insertBefore(option, nextOption || null);
+    options = [...roller.querySelectorAll(".roller-option")];
+  }
+  const selectedIndex = options.indexOf(option);
+  options.forEach((item, index) => {
+    const selected = index === selectedIndex;
+    item.classList.toggle("is-selected", selected);
+    item.setAttribute("aria-selected", String(selected));
+  });
+  const input = el(roller.dataset.inputId);
+  input.value = option.dataset.value;
+  requestAnimationFrame(() => {
+    const rowHeight = option.offsetHeight || 42;
+    roller.scrollTo({ top: selectedIndex * rowHeight, behavior: "auto" });
+  });
+  if (notify) input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function setupRoller(rollerId, inputId, values, format = String) {
+  const roller = el(rollerId);
+  roller.dataset.inputId = inputId;
+  roller.valueFormatter = format;
+  values.forEach((value) => roller.appendChild(rollerOption(value, format)));
+  roller.addEventListener("click", (event) => {
+    const option = event.target.closest(".roller-option");
+    if (option) selectRollerValue(rollerId, option.dataset.value, true);
+  });
+  roller.addEventListener("scroll", () => {
+    clearTimeout(roller.scrollTimer);
+    roller.scrollTimer = setTimeout(() => {
+      const options = [...roller.querySelectorAll(".roller-option")];
+      const rowHeight = options[0]?.offsetHeight || 42;
+      const index = Math.max(0, Math.min(options.length - 1, Math.round(roller.scrollTop / rowHeight)));
+      selectRollerValue(rollerId, options[index].dataset.value, true);
+    }, 80);
+  }, { passive: true });
+  roller.addEventListener("keydown", (event) => {
+    if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const options = [...roller.querySelectorAll(".roller-option")];
+    const current = options.findIndex((option) => option.classList.contains("is-selected"));
+    const offset = event.key === "ArrowUp" ? -1 : 1;
+    const next = Math.max(0, Math.min(options.length - 1, current + offset));
+    selectRollerValue(rollerId, options[next].dataset.value, true);
+  });
+  selectRollerValue(rollerId, el(inputId).value);
+}
+
 function setupTimerDurationPicker() {
-  el("timerMinutes").innerHTML = timerMinuteValues()
-    .map((value) => `<option value="${value}"${value === 30 ? " selected" : ""}>${value}</option>`)
-    .join("");
-  el("timerSeconds").innerHTML = Array.from({ length: 60 }, (_, value) =>
-    `<option value="${value}">${String(value).padStart(2, "0")}</option>`,
-  ).join("");
+  const padded = (value) => String(value).padStart(2, "0");
+  setupRoller("timerMinuteRoller", "timerMinutes", timerMinuteValues());
+  setupRoller("timerSecondRoller", "timerSeconds", Array.from({ length: 60 }, (_, value) => value), padded);
+  setupRoller("scheduleHourRoller", "scheduleHour", Array.from({ length: 24 }, (_, value) => value), padded);
+  setupRoller("scheduleMinuteRoller", "scheduleMinute", Array.from({ length: 60 }, (_, value) => value), padded);
+  setupRoller("captureTimeoutRoller", "captureTimeoutMobile", Array.from({ length: 30 }, (_, index) => index + 1));
+  el("scheduleHour").addEventListener("change", syncScheduleTimeFromRollers);
+  el("scheduleMinute").addEventListener("change", syncScheduleTimeFromRollers);
+  el("scheduleTime").addEventListener("change", () => setScheduleTimeFields(el("scheduleTime").value));
+  el("captureTimeoutMobile").addEventListener("change", () => {
+    el("captureTimeout").value = el("captureTimeoutMobile").value;
+  });
+  el("captureTimeout").addEventListener("change", () => {
+    selectRollerValue("captureTimeoutRoller", el("captureTimeout").value);
+  });
 }
 
 function starButton(actionType, actionId, starred) {
@@ -641,12 +716,8 @@ function scheduleCountdownUpdate() {
 function setTimerDurationFields(seconds) {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  const minuteSelect = el("timerMinutes");
-  if (![...minuteSelect.options].some((option) => Number(option.value) === minutes)) {
-    minuteSelect.add(new Option(String(minutes), String(minutes)));
-  }
-  minuteSelect.value = String(minutes);
-  el("timerSeconds").value = String(remainingSeconds);
+  selectRollerValue("timerMinuteRoller", minutes);
+  selectRollerValue("timerSecondRoller", remainingSeconds);
   el("timerForm").elements.minutes.value = Number((seconds / 60).toFixed(4));
 }
 
@@ -754,16 +825,29 @@ function scheduleTargetValue(schedule) {
     : `signal:${schedule.button_id}`;
 }
 
+function syncScheduleTimeFromRollers() {
+  const hour = String(el("scheduleHour").value).padStart(2, "0");
+  const minute = String(el("scheduleMinute").value).padStart(2, "0");
+  el("scheduleTime").value = `${hour}:${minute}`;
+}
+
+function setScheduleTimeFields(time) {
+  const [hour, minute] = String(time || "00:00").split(":").map(Number);
+  el("scheduleTime").value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  selectRollerValue("scheduleHourRoller", hour);
+  selectRollerValue("scheduleMinuteRoller", minute);
+}
+
 function openScheduleDialog(schedule = null) {
   const form = el("scheduleForm");
   form.reset();
   editingSchedule = schedule ? { id: schedule.id, kind: schedule.kind } : null;
   el("scheduleDialogTitle").textContent = schedule ? "Edit schedule" : "Add schedule";
   el("saveSchedule").textContent = schedule ? "Save changes" : "Save schedule";
+  setScheduleTimeFields(schedule?.time_of_day || "00:00");
   if (schedule) {
     form.elements.target.value = scheduleTargetValue(schedule);
     form.elements.name.value = schedule.name;
-    form.elements.time_of_day.value = schedule.time_of_day;
     form.elements.days.forEach((input) => {
       input.checked = schedule.days.includes(Number(input.value));
     });
@@ -931,29 +1015,40 @@ function syncWorkflowStepOptions() {
   });
 }
 
-function addWorkflowStepRow(delay = 30, unit = 60, buttonId = "") {
+function addWorkflowStepRow(delaySeconds = 30 * 60, buttonId = "") {
+  workflowStepKey += 1;
+  const key = workflowStepKey;
+  const minutes = Math.floor(delaySeconds / 60);
+  const seconds = delaySeconds % 60;
+  const decimalMinutes = Number((delaySeconds / 60).toFixed(4));
   const row = document.createElement("div");
   row.className = "workflow-step";
   row.innerHTML = `
-    <input name="delay" aria-label="Delay" type="number" min="0" max="10080" step="any" value="${delay}" required />
-    <select name="unit" aria-label="Delay unit">
-      <option value="60"${unit === 60 ? " selected" : ""}>minutes</option>
-      <option value="3600"${unit === 3600 ? " selected" : ""}>hours</option>
-    </select>
+    <input class="workflow-delay-desktop" name="delay_minutes" aria-label="Delay in minutes" type="number" min="0" max="10080" step="any" value="${decimalMinutes}" required />
+    <div class="workflow-delay-mobile" role="group" aria-label="Delay">
+      <div class="roller-field compact-roller-field">
+        <span>Min</span>
+        <div class="roller-frame"><div id="workflowMinuteRoller${key}" class="roller" role="listbox" tabindex="0" aria-label="Delay minutes"></div></div>
+        <input id="workflowMinutes${key}" type="hidden" value="${minutes}" />
+      </div>
+      <div class="roller-field compact-roller-field">
+        <span>Sec</span>
+        <div class="roller-frame"><div id="workflowSecondRoller${key}" class="roller" role="listbox" tabindex="0" aria-label="Delay seconds"></div></div>
+        <input id="workflowSeconds${key}" type="hidden" value="${seconds}" />
+      </div>
+    </div>
     <select name="button_id" aria-label="Signal" required></select>
     <button class="secondary icon-button" type="button" data-remove-step aria-label="Remove workflow step" title="Remove step">${actionIcon("trash")}</button>
   `;
   el("workflowSteps").appendChild(row);
+  const padded = (value) => String(value).padStart(2, "0");
+  setupRoller(`workflowMinuteRoller${key}`, `workflowMinutes${key}`, timerMinuteValues());
+  setupRoller(`workflowSecondRoller${key}`, `workflowSeconds${key}`, Array.from({ length: 60 }, (_, value) => value), padded);
   syncWorkflowStepOptions();
   if (buttonId) row.querySelector("select[name='button_id']").value = String(buttonId);
   row.querySelector("[data-remove-step]").addEventListener("click", () => {
     if (document.querySelectorAll(".workflow-step").length > 1) row.remove();
   });
-}
-
-function splitDelay(seconds) {
-  if (seconds > 0 && seconds % 3600 === 0) return { delay: seconds / 3600, unit: 3600 };
-  return { delay: Number((seconds / 60).toFixed(4)), unit: 60 };
 }
 
 function resetWorkflowForm() {
@@ -974,10 +1069,9 @@ function editWorkflow(workflowId) {
   el("workflowForm").querySelector("input[name='name']").value = workflow.name;
   const steps = workflowSteps(workflow.id);
   steps.forEach((step) => {
-    const { delay, unit } = splitDelay(step.delay_seconds);
-    addWorkflowStepRow(delay, unit, step.button_id);
+    addWorkflowStepRow(step.delay_seconds, step.button_id);
   });
-  if (!steps.length) addWorkflowStepRow(0, 60);
+  if (!steps.length) addWorkflowStepRow(0);
 
   el("saveWorkflowButton").textContent = "Save changes";
   el("workflowDialog").showModal();
@@ -1368,13 +1462,17 @@ el("workflowForm").addEventListener("submit", async (event) => {
   const rows = [...form.querySelectorAll(".workflow-step")];
   const saveButton = el("saveWorkflowButton");
   try {
+    const useMobilePicker = window.matchMedia("(max-width: 620px)").matches;
     const steps = rows.map((row) => ({
       button_id: Number(row.querySelector("select[name='button_id']").value),
-      delay_seconds: delayToSeconds(
-        row.querySelector("input[name='delay']").value,
-        Number(row.querySelector("select[name='unit']").value),
-        true,
-      ),
+      delay_seconds: useMobilePicker
+        ? delayToSeconds(
+            Number(row.querySelector(".workflow-delay-mobile input[id^='workflowMinutes']").value) * 60
+              + Number(row.querySelector(".workflow-delay-mobile input[id^='workflowSeconds']").value),
+            1,
+            true,
+          )
+        : delayToSeconds(row.querySelector("input[name='delay_minutes']").value, 60, true),
     }));
     if (!steps.length || steps.some((step) => !step.button_id)) {
       throw new Error("Add at least one workflow step with a signal");

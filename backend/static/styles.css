@@ -330,6 +330,97 @@ label {
   display: none;
 }
 
+.schedule-time-mobile {
+  display: none;
+}
+
+.capture-timeout-mobile,
+.workflow-delay-mobile {
+  display: none;
+}
+
+.roller-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.roller-field > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.roller-frame {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfb;
+  overflow: hidden;
+}
+
+.roller-frame::after {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  left: 0;
+  height: 42px;
+  border-top: 1px solid #b9c6bc;
+  border-bottom: 1px solid #b9c6bc;
+  background: rgba(232, 237, 232, 0.46);
+  content: "";
+  pointer-events: none;
+}
+
+.roller {
+  height: 126px;
+  padding: 42px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.roller::-webkit-scrollbar {
+  display: none;
+}
+
+.roller-option {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 6px;
+  scroll-snap-align: center;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.roller-option:hover {
+  background: transparent;
+}
+
+.roller-option.is-selected {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.roller-separator {
+  align-self: center;
+  padding-top: 20px;
+  font-size: 24px;
+  font-weight: 800;
+}
+
 .timer-preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -548,17 +639,7 @@ label {
   gap: 8px;
 }
 
-.workflow-editor {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr);
-  gap: 8px;
-  align-items: start;
-}
-
 .workflow-column-headings {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr);
-  gap: 8px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
@@ -566,7 +647,7 @@ label {
 
 .workflow-step-headings {
   display: grid;
-  grid-template-columns: 90px 110px minmax(180px, 1fr) 60px;
+  grid-template-columns: 120px minmax(180px, 1fr) 60px;
   gap: 8px;
 }
 
@@ -590,7 +671,7 @@ label {
 
 .workflow-step {
   display: grid;
-  grid-template-columns: 90px 110px minmax(180px, 1fr) 60px;
+  grid-template-columns: 120px minmax(180px, 1fr) 60px;
   gap: 8px;
   align-items: start;
 }
@@ -1319,7 +1400,7 @@ fieldset input {
 
   .layout {
     gap: 12px;
-    padding: 12px 12px 28px;
+    padding: 12px 12px max(64px, calc(28px + env(safe-area-inset-bottom)));
   }
 
   .panel {
@@ -1341,11 +1422,14 @@ fieldset input {
     width: 100%;
     max-width: none;
     max-height: calc(100dvh - 12px);
+    overflow-y: auto;
+    overscroll-behavior-y: auto;
     margin: auto 0 0;
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
     border-radius: var(--radius) var(--radius) 0 0;
+    -webkit-overflow-scrolling: touch;
   }
 
   .form-dialog-shell {
@@ -1383,14 +1467,84 @@ fieldset input {
     gap: 10px;
   }
 
+  .schedule-time-desktop {
+    display: none;
+  }
+
+  .schedule-time-mobile {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .capture-timeout-desktop {
+    display: none;
+  }
+
+  .capture-timeout-mobile {
+    display: grid;
+  }
+
   .workflow-footer {
     display: grid;
     grid-template-columns: 1fr;
   }
 
-  .workflow-editor,
   .workflow-step {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(118px, 1fr) minmax(110px, 1.25fr) 36px;
+    gap: 5px;
+    align-items: center;
+  }
+
+  .workflow-delay-desktop {
+    display: none;
+  }
+
+  .workflow-delay-mobile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .workflow-delay-mobile .roller {
+    height: 96px;
+    padding: 32px 0;
+  }
+
+  .workflow-delay-mobile .roller-frame::after {
+    top: 32px;
+    height: 32px;
+  }
+
+  .workflow-delay-mobile .roller-option {
+    min-height: 32px;
+    padding: 0 2px;
+    font-size: 13px;
+  }
+
+  .workflow-delay-mobile .roller-option.is-selected {
+    font-size: 15px;
+  }
+
+  .compact-roller-field {
+    gap: 3px;
+  }
+
+  .compact-roller-field > span {
+    font-size: 10px;
+    text-align: center;
+  }
+
+  .workflow-step select {
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 16px;
+  }
+
+  .workflow-step > .icon-button {
+    width: 36px;
+    min-width: 36px;
+    min-height: 40px;
   }
 
   .workflow-column-headings {
@@ -1415,7 +1569,8 @@ fieldset input {
   }
 
   .timer-preset-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .row {
@@ -1427,7 +1582,8 @@ fieldset input {
   }
 
   .signal-config-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
   }
 
   .node-config-row {
@@ -1447,14 +1603,40 @@ fieldset input {
   }
 
   .signal-config-fields {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(90px, 1fr) auto;
+    gap: 6px;
+  }
+
+  .signal-config-fields label {
+    display: none;
+  }
+
+  .signal-config-fields input {
+    min-width: 0;
+    padding: 8px;
+    font-size: 16px;
+  }
+
+  .signal-config-fields .muted {
+    font-size: 11px;
+    white-space: nowrap;
   }
 
   .signal-config-row .row-actions {
-    justify-content: stretch;
+    flex-wrap: nowrap;
+    gap: 4px;
   }
 
-  .signal-config-row .row-actions button:not(.icon-button) {
-    flex: 1;
+  .signal-config-row .row-actions button {
+    width: 36px;
+    min-width: 36px;
+    min-height: 40px;
+  }
+
+  .signal-config-row .row-actions button[data-save-signal] {
+    width: auto;
+    min-width: 44px;
+    padding: 0 7px;
+    font-size: 12px;
   }
 }
