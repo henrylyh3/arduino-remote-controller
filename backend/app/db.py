@@ -71,6 +71,22 @@ CREATE TABLE IF NOT EXISTS workflows (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS timer_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    button_id INTEGER REFERENCES buttons(id) ON DELETE CASCADE,
+    workflow_id INTEGER REFERENCES workflows(id) ON DELETE CASCADE,
+    duration_seconds INTEGER NOT NULL CHECK(duration_seconds > 0 AND duration_seconds <= 604800),
+    run_at_utc TEXT,
+    active INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    legacy_timer_id INTEGER UNIQUE REFERENCES timers(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK((button_id IS NOT NULL AND workflow_id IS NULL) OR
+          (button_id IS NULL AND workflow_id IS NOT NULL)),
+    CHECK((active = 0 AND run_at_utc IS NULL) OR
+          (active = 1 AND run_at_utc IS NOT NULL))
+);
+
 CREATE TABLE IF NOT EXISTS workflow_steps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
@@ -151,6 +167,31 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO timer_presets
+                (button_id, duration_seconds, run_at_utc, active, error, legacy_timer_id, created_at)
+            SELECT
+                button_id,
+                MAX(1, CAST(ROUND((julianday(run_at_utc) - julianday(created_at)) * 86400) AS INTEGER)),
+                CASE WHEN status IN ('pending', 'running') THEN run_at_utc ELSE NULL END,
+                CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END,
+                error,
+                id,
+                created_at
+            FROM timers
+            """
+        )
+        conn.execute(
+            """
+            UPDATE timers
+            SET status = 'cancelled'
+            WHERE status IN ('pending', 'running')
+              AND id IN (
+                  SELECT legacy_timer_id FROM timer_presets WHERE legacy_timer_id IS NOT NULL
+              )
+            """
+        )
         node_columns = {row["name"] for row in conn.execute("PRAGMA table_info(nodes)")}
         if "sort_order" not in node_columns:
             conn.execute("ALTER TABLE nodes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")

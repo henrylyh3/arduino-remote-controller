@@ -35,6 +35,7 @@ class NodeIn(BaseModel):
 
 class NodeUpdateIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
+    base_url: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class NodeOrderIn(BaseModel):
@@ -91,12 +92,31 @@ class TimerIn(BaseModel):
     name: str = Field(default="Timer", min_length=1, max_length=80)
 
 
+class TimerPresetIn(BaseModel):
+    target_kind: Literal["signal", "workflow"]
+    target_id: int = Field(gt=0)
+    seconds: int = Field(gt=0, le=7 * 24 * 60 * 60)
+
+
 class ScheduleIn(BaseModel):
     button_id: int
     name: str = Field(default="Schedule", min_length=1, max_length=80)
     time_of_day: str = Field(pattern=r"^\d{2}:\d{2}$")
     days: list[int] = Field(min_length=1, max_length=7)
     enabled: bool = True
+
+
+class ScheduleItemIn(BaseModel):
+    target_kind: Literal["signal", "workflow"]
+    target_id: int = Field(gt=0)
+    name: str = Field(default="Schedule", min_length=1, max_length=80)
+    time_of_day: str = Field(pattern=r"^\d{2}:\d{2}$")
+    days: list[int] = Field(min_length=1, max_length=7)
+    enabled: bool = True
+
+
+class EnabledIn(BaseModel):
+    enabled: bool
 
 
 class WorkflowStepIn(BaseModel):
@@ -531,6 +551,41 @@ async def run_due_timers() -> None:
             )
 
 
+async def run_due_timer_presets() -> None:
+    due = db.fetch_all(
+        """
+        SELECT id, button_id, workflow_id
+        FROM timer_presets
+        WHERE active = 1 AND run_at_utc <= ?
+        ORDER BY run_at_utc ASC
+        LIMIT 10
+        """,
+        (utc_stamp(),),
+    )
+    for timer in due:
+        db.execute(
+            "UPDATE timer_presets SET active = 0, run_at_utc = NULL WHERE id = ? AND active = 1",
+            (timer["id"],),
+        )
+        try:
+            if timer["button_id"] is not None:
+                await send_button_to_node(timer["button_id"])
+            else:
+                run = create_workflow_run_record(timer["workflow_id"])
+                db.execute(
+                    "INSERT INTO events (button_id, status, message) VALUES (NULL, ?, ?)",
+                    ("workflow", f"Started workflow {run['name']} from timer"),
+                )
+            db.execute("UPDATE timer_presets SET error = NULL WHERE id = ?", (timer["id"],))
+        except Exception as exc:
+            message = str(exc)
+            db.execute("UPDATE timer_presets SET error = ? WHERE id = ?", (message, timer["id"]))
+            db.execute(
+                "INSERT INTO events (button_id, status, message) VALUES (?, ?, ?)",
+                (timer["button_id"], "failed", f"Timer failed: {message}"),
+            )
+
+
 async def run_due_schedules() -> None:
     now = local_now()
     current_time = now.strftime("%H:%M")
@@ -695,6 +750,7 @@ async def scheduler_loop() -> None:
     while True:
         try:
             await run_due_timers()
+            await run_due_timer_presets()
             await run_due_schedules()
             await run_due_workflow_schedules()
             await run_due_workflow_steps()
@@ -773,6 +829,7 @@ def state() -> dict[str, Any]:
     buttons = db.fetch_all("SELECT * FROM buttons ORDER BY name")
     ac_controllers = db.fetch_all("SELECT * FROM ac_controllers ORDER BY id")
     timers = db.fetch_all("SELECT * FROM timers ORDER BY created_at DESC LIMIT 50")
+    timer_presets = db.fetch_all("SELECT * FROM timer_presets ORDER BY created_at DESC")
     schedules = db.fetch_all("SELECT * FROM schedules ORDER BY time_of_day, name")
     workflows = db.fetch_all("SELECT * FROM workflows ORDER BY created_at DESC")
     workflow_steps = db.fetch_all("SELECT * FROM workflow_steps ORDER BY workflow_id, step_order")
@@ -806,6 +863,14 @@ def state() -> dict[str, Any]:
     for schedule in schedules:
         schedule["enabled"] = bool(schedule["enabled"])
         schedule["days"] = [int(day) for day in schedule["days"].split(",") if day != ""]
+    for timer in timer_presets:
+        timer["active"] = bool(timer["active"])
+        if timer["button_id"] is not None:
+            timer["target_kind"] = "signal"
+            timer["target_id"] = timer["button_id"]
+        else:
+            timer["target_kind"] = "workflow"
+            timer["target_id"] = timer["workflow_id"]
     for schedule in workflow_schedules:
         schedule["enabled"] = bool(schedule["enabled"])
         schedule["days"] = [int(day) for day in schedule["days"].split(",") if day != ""]
@@ -819,6 +884,7 @@ def state() -> dict[str, Any]:
         "buttons": buttons,
         "ac_controllers": ac_controllers,
         "timers": timers,
+        "timer_presets": timer_presets,
         "schedules": schedules,
         "workflows": workflows,
         "workflow_steps": workflow_steps,
@@ -860,13 +926,15 @@ def reorder_nodes(order: NodeOrderIn) -> dict[str, Any]:
 
 @app.put("/api/nodes/{node_id}")
 def update_node(node_id: int, node: NodeUpdateIn) -> dict[str, Any]:
-    if not db.fetch_one("SELECT id FROM nodes WHERE id = ?", (node_id,)):
+    current = db.fetch_one("SELECT base_url FROM nodes WHERE id = ?", (node_id,))
+    if not current:
         raise HTTPException(status_code=404, detail="Node not found")
     name = node.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Node name is required")
-    db.execute("UPDATE nodes SET name = ? WHERE id = ?", (name, node_id))
-    return {"id": node_id, "name": name}
+    base_url = clean_base_url(node.base_url) if node.base_url is not None else current["base_url"]
+    db.execute("UPDATE nodes SET name = ?, base_url = ? WHERE id = ?", (name, base_url, node_id))
+    return {"id": node_id, "name": name, "base_url": base_url}
 
 
 @app.delete("/api/nodes/{node_id}")
@@ -1169,6 +1237,83 @@ def cancel_timer(timer_id: int) -> dict[str, Any]:
     return {"ok": True}
 
 
+def ensure_timer_preset_target(timer: TimerPresetIn) -> None:
+    if timer.target_kind == "signal":
+        ensure_button_exists(timer.target_id)
+    elif not db.fetch_one("SELECT id FROM workflows WHERE id = ?", (timer.target_id,)):
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+
+@app.post("/api/timer-presets")
+def create_timer_preset(timer: TimerPresetIn) -> dict[str, Any]:
+    ensure_timer_preset_target(timer)
+    button_id = timer.target_id if timer.target_kind == "signal" else None
+    workflow_id = timer.target_id if timer.target_kind == "workflow" else None
+    timer_id = db.execute(
+        """
+        INSERT INTO timer_presets (button_id, workflow_id, duration_seconds)
+        VALUES (?, ?, ?)
+        """,
+        (button_id, workflow_id, timer.seconds),
+    )
+    return {"id": timer_id}
+
+
+@app.put("/api/timer-presets/{timer_id}")
+def update_timer_preset(timer_id: int, timer: TimerPresetIn) -> dict[str, Any]:
+    existing = db.fetch_one("SELECT active FROM timer_presets WHERE id = ?", (timer_id,))
+    if not existing:
+        raise HTTPException(status_code=404, detail="Timer not found")
+    if existing["active"]:
+        raise HTTPException(status_code=409, detail="Cancel timer before editing")
+    ensure_timer_preset_target(timer)
+    button_id = timer.target_id if timer.target_kind == "signal" else None
+    workflow_id = timer.target_id if timer.target_kind == "workflow" else None
+    db.execute(
+        """
+        UPDATE timer_presets
+        SET button_id = ?, workflow_id = ?, duration_seconds = ?, error = NULL
+        WHERE id = ?
+        """,
+        (button_id, workflow_id, timer.seconds, timer_id),
+    )
+    return {"ok": True}
+
+
+@app.post("/api/timer-presets/{timer_id}/start")
+def start_timer_preset(timer_id: int) -> dict[str, Any]:
+    timer = db.fetch_one("SELECT * FROM timer_presets WHERE id = ?", (timer_id,))
+    if not timer:
+        raise HTTPException(status_code=404, detail="Timer not found")
+    if timer["active"]:
+        raise HTTPException(status_code=409, detail="Timer is already active")
+    run_at = utc_stamp(utc_now() + timedelta(seconds=timer["duration_seconds"]))
+    db.execute(
+        "UPDATE timer_presets SET active = 1, run_at_utc = ?, error = NULL WHERE id = ?",
+        (run_at, timer_id),
+    )
+    return {"ok": True, "run_at_utc": run_at}
+
+
+@app.post("/api/timer-presets/{timer_id}/cancel")
+def cancel_timer_preset(timer_id: int) -> dict[str, Any]:
+    if not db.fetch_one("SELECT id FROM timer_presets WHERE id = ?", (timer_id,)):
+        raise HTTPException(status_code=404, detail="Timer not found")
+    db.execute(
+        "UPDATE timer_presets SET active = 0, run_at_utc = NULL, error = NULL WHERE id = ?",
+        (timer_id,),
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/timer-presets/{timer_id}")
+def delete_timer_preset(timer_id: int) -> dict[str, Any]:
+    if not db.fetch_one("SELECT id FROM timer_presets WHERE id = ?", (timer_id,)):
+        raise HTTPException(status_code=404, detail="Timer not found")
+    db.execute("DELETE FROM timer_presets WHERE id = ?", (timer_id,))
+    return {"ok": True}
+
+
 @app.post("/api/workflows")
 def create_workflow(workflow: WorkflowIn) -> dict[str, Any]:
     steps = workflow.steps
@@ -1342,6 +1487,97 @@ def toggle_schedule(schedule_id: int) -> dict[str, Any]:
     enabled = 0 if schedule["enabled"] else 1
     db.execute("UPDATE schedules SET enabled = ? WHERE id = ?", (enabled, schedule_id))
     return {"ok": True, "enabled": bool(enabled)}
+
+
+def schedule_storage(schedule_kind: Literal["signal", "workflow"]) -> tuple[str, str]:
+    if schedule_kind == "signal":
+        return "schedules", "button_id"
+    return "workflow_schedules", "workflow_id"
+
+
+def ensure_schedule_target(schedule: ScheduleItemIn) -> None:
+    if schedule.target_kind == "signal":
+        ensure_button_exists(schedule.target_id)
+    elif not db.fetch_one("SELECT id FROM workflows WHERE id = ?", (schedule.target_id,)):
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+
+@app.post("/api/schedule-items")
+def create_schedule_item(schedule: ScheduleItemIn) -> dict[str, Any]:
+    ensure_schedule_target(schedule)
+    time_of_day, unique_days = normalize_schedule(schedule.time_of_day, schedule.days)
+    table, target_column = schedule_storage(schedule.target_kind)
+    schedule_id = db.execute(
+        f"""
+        INSERT INTO {table} ({target_column}, name, time_of_day, days, enabled)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            schedule.target_id,
+            schedule.name.strip(),
+            time_of_day,
+            ",".join(str(day) for day in unique_days),
+            int(schedule.enabled),
+        ),
+    )
+    return {"id": schedule_id, "kind": schedule.target_kind}
+
+
+@app.put("/api/schedule-items/{schedule_kind}/{schedule_id}")
+def update_schedule_item(
+    schedule_kind: Literal["signal", "workflow"],
+    schedule_id: int,
+    schedule: ScheduleItemIn,
+) -> dict[str, Any]:
+    source_table, _ = schedule_storage(schedule_kind)
+    if not db.fetch_one(f"SELECT id FROM {source_table} WHERE id = ?", (schedule_id,)):
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    ensure_schedule_target(schedule)
+    time_of_day, unique_days = normalize_schedule(schedule.time_of_day, schedule.days)
+    target_table, target_column = schedule_storage(schedule.target_kind)
+    values = (
+        schedule.target_id,
+        schedule.name.strip(),
+        time_of_day,
+        ",".join(str(day) for day in unique_days),
+        int(schedule.enabled),
+    )
+    with db.connect() as conn:
+        if source_table == target_table:
+            conn.execute(
+                f"""
+                UPDATE {source_table}
+                SET {target_column} = ?, name = ?, time_of_day = ?, days = ?,
+                    enabled = ?, last_run_date = NULL
+                WHERE id = ?
+                """,
+                (*values, schedule_id),
+            )
+            updated_id = schedule_id
+        else:
+            conn.execute(f"DELETE FROM {source_table} WHERE id = ?", (schedule_id,))
+            cursor = conn.execute(
+                f"""
+                INSERT INTO {target_table} ({target_column}, name, time_of_day, days, enabled)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            updated_id = int(cursor.lastrowid)
+    return {"id": updated_id, "kind": schedule.target_kind}
+
+
+@app.put("/api/schedule-items/{schedule_kind}/{schedule_id}/enabled")
+def set_schedule_enabled(
+    schedule_kind: Literal["signal", "workflow"],
+    schedule_id: int,
+    value: EnabledIn,
+) -> dict[str, Any]:
+    table, _ = schedule_storage(schedule_kind)
+    if not db.fetch_one(f"SELECT id FROM {table} WHERE id = ?", (schedule_id,)):
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    db.execute("UPDATE " + table + " SET enabled = ? WHERE id = ?", (int(value.enabled), schedule_id))
+    return {"ok": True, "enabled": value.enabled}
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

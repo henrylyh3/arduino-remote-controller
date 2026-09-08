@@ -34,6 +34,10 @@ textarea {
   font: inherit;
 }
 
+.action-select {
+  font-weight: 700;
+}
+
 button {
   min-height: 40px;
   border: 0;
@@ -115,6 +119,50 @@ textarea {
   background: #fbfcfb;
   color: var(--text);
   padding: 10px 11px;
+}
+
+select {
+  min-height: 44px;
+  appearance: none;
+  border-color: #b9c6bc;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23647067' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 18px;
+  cursor: pointer;
+  padding-right: 38px;
+  box-shadow: 0 1px 2px rgba(23, 32, 27, 0.06);
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+select:hover {
+  border-color: #839589;
+  background-color: #f8faf8;
+}
+
+select:focus-visible {
+  border-color: var(--accent);
+  outline: 3px solid rgba(15, 122, 84, 0.16);
+  outline-offset: 1px;
+  box-shadow: 0 1px 2px rgba(23, 32, 27, 0.08);
+}
+
+select:disabled {
+  background-color: #eef1ee;
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+select optgroup {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+select option {
+  color: var(--text);
+  font-weight: 600;
 }
 
 textarea {
@@ -252,20 +300,20 @@ label {
   margin-bottom: 16px;
 }
 
+.add-icon-button {
+  font-size: 24px;
+  line-height: 1;
+}
+
 .side-stack {
   display: grid;
   gap: 18px;
 }
 
 .form,
-.inline-form,
-.schedule-form {
+.inline-form {
   display: grid;
   gap: 12px;
-}
-
-.compact-form {
-  max-width: 520px;
 }
 
 .capture-actions {
@@ -282,17 +330,103 @@ label {
   display: none;
 }
 
-.node-management {
+.timer-preset-grid {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
 }
 
-.node-management h3 {
-  margin: 0;
-  font-size: 16px;
+.timer-preset {
+  position: relative;
+  min-width: 0;
+}
+
+.timer-preset-trigger {
+  display: grid;
+  width: 100%;
+  min-height: 98px;
+  align-content: start;
+  gap: 9px;
+  border: 1px solid var(--line);
+  background: #e8ede8;
+  color: var(--text);
+  padding: 11px;
+  text-align: left;
+}
+
+.timer-preset-trigger:hover {
+  background: #dce3dd;
+}
+
+.timer-preset.is-active .timer-preset-trigger {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.timer-preset.is-active .timer-preset-trigger:hover {
+  background: var(--accent-dark);
+}
+
+.timer-preset-trigger strong {
+  min-height: 34px;
+  overflow-wrap: anywhere;
+}
+
+.timer-preset-trigger output {
+  padding-right: 72px;
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-preset-error {
+  padding-right: 72px;
+  color: var(--bad);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.timer-preset-actions {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+}
+
+.timer-preset-actions .icon-button {
+  min-height: 32px;
+  width: 32px;
+  padding: 6px;
+}
+
+.timer-preset-edit {
+  background: #dce3dd;
+  color: var(--text);
+}
+
+.timer-preset-edit:hover {
+  background: #cbd5cd;
+}
+
+.timer-preset-delete {
+  background: #f5e7e7;
+  color: var(--bad);
+}
+
+.timer-preset-delete:hover {
+  background: #ecd2d2;
+}
+
+.timer-preset.is-active .timer-preset-edit {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.timer-preset.is-active .timer-preset-edit:hover {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .node-list {
@@ -303,7 +437,7 @@ label {
   display: grid;
   grid-template-columns: 40px minmax(160px, 1fr) auto;
   gap: 10px;
-  align-items: start;
+  align-items: center;
   border-top: 1px solid var(--line);
   padding: 10px 0;
 }
@@ -317,6 +451,11 @@ label {
   display: grid;
   gap: 5px;
   min-width: 0;
+}
+
+.node-config-name {
+  font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 .node-meta,
@@ -404,11 +543,6 @@ label {
   grid-template-columns: minmax(180px, 1.5fr) minmax(150px, 1fr) 120px 90px;
 }
 
-.schedule-form {
-  grid-template-columns: minmax(180px, 1.4fr) minmax(150px, 1fr) 120px minmax(220px, 2fr) 90px;
-  align-items: start;
-}
-
 .workflow-steps {
   display: grid;
   gap: 8px;
@@ -416,9 +550,28 @@ label {
 
 .workflow-editor {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(0, 4fr);
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr);
   gap: 8px;
   align-items: start;
+}
+
+.workflow-column-headings {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr);
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workflow-step-headings {
+  display: grid;
+  grid-template-columns: 90px 110px minmax(180px, 1fr) 60px;
+  gap: 8px;
+}
+
+.workflow-step-headings span:last-child {
+  text-align: center;
 }
 
 .workflow-footer {
@@ -437,9 +590,13 @@ label {
 
 .workflow-step {
   display: grid;
-  grid-template-columns: 100px 100px minmax(180px, 1fr) 40px;
+  grid-template-columns: 90px 110px minmax(180px, 1fr) 60px;
   gap: 8px;
   align-items: start;
+}
+
+.workflow-step > .icon-button {
+  justify-self: center;
 }
 
 .step-summary {
@@ -478,6 +635,99 @@ fieldset label {
 
 fieldset input {
   width: auto;
+}
+
+.signal-type-selector {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  border: 0;
+  padding: 0;
+}
+
+.signal-type-selector legend {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.signal-type-selector label {
+  position: relative;
+  display: block;
+}
+
+.signal-type-selector input,
+.switch-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.signal-type-selector span {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #b9c6bc;
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.signal-type-selector input:checked + span {
+  border-color: var(--accent);
+  background: #e5f1eb;
+  color: var(--accent-dark);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.signal-type-selector input:focus-visible + span,
+.switch-input:focus-visible + .switch-track {
+  outline: 3px solid rgba(15, 122, 84, 0.18);
+  outline-offset: 2px;
+}
+
+.switch-track {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 42px;
+  border-radius: 999px;
+  background: #b9c2bb;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.switch-track::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(23, 32, 27, 0.3);
+  content: "";
+  transition: transform 140ms ease;
+}
+
+.switch-input:checked + .switch-track {
+  background: var(--accent);
+}
+
+.switch-input:checked + .switch-track::after {
+  transform: translateX(18px);
+}
+
+.switch-input:disabled + .switch-track {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .device-grid {
@@ -625,6 +875,128 @@ fieldset input {
   color: var(--text);
   padding: 0;
   box-shadow: 0 24px 70px rgba(23, 32, 27, 0.28);
+}
+
+.form-dialog {
+  width: min(520px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(23, 32, 27, 0.28);
+}
+
+.workflow-dialog {
+  width: min(820px, calc(100vw - 28px));
+}
+
+.form-dialog::backdrop {
+  background: rgba(20, 27, 23, 0.5);
+}
+
+.form-dialog-shell {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.form-dialog-header,
+.form-dialog-actions,
+.schedule-enabled-field,
+.schedule-list-switch {
+  display: flex;
+  align-items: center;
+}
+
+.form-dialog-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.form-dialog-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.form-dialog-header .icon-button {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.schedule-days {
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.schedule-days legend {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.schedule-days .day-switch {
+  position: relative;
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 8px;
+  cursor: pointer;
+}
+
+.day-switch .switch-track {
+  width: 34px;
+  height: 20px;
+  flex-basis: 34px;
+}
+
+.day-switch .switch-track::after {
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+}
+
+.day-switch .switch-input:checked + .switch-track::after {
+  transform: translateX(14px);
+}
+
+.schedule-enabled-field {
+  position: relative;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+  cursor: pointer;
+}
+
+.schedule-enabled-field > span:first-child {
+  display: grid;
+  gap: 2px;
+  color: var(--text);
+}
+
+.schedule-enabled-field small {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.form-dialog-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.schedule-list-switch {
+  position: relative;
+  min-height: 40px;
+  cursor: pointer;
 }
 
 .ac-controller-dialog::backdrop {
@@ -836,6 +1208,11 @@ fieldset input {
   gap: 8px;
 }
 
+.schedule-row-actions {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
 .star-button {
   width: 40px;
   min-width: 40px;
@@ -904,13 +1281,7 @@ fieldset input {
     grid-row: auto;
   }
 
-  .inline-form,
-  .schedule-form {
-    grid-template-columns: 1fr;
-  }
-
-  .workflow-editor,
-  .workflow-step {
+  .inline-form {
     grid-template-columns: 1fr;
   }
 
@@ -966,6 +1337,29 @@ fieldset input {
     border-radius: var(--radius) var(--radius) 0 0;
   }
 
+  .form-dialog {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 12px);
+    margin: auto 0 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .form-dialog-shell {
+    padding: 18px 16px max(18px, env(safe-area-inset-bottom));
+  }
+
+  .schedule-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-dialog-actions button {
+    flex: 1;
+  }
+
   .ac-controller-shell {
     gap: 15px;
     padding: 18px 16px max(18px, env(safe-area-inset-bottom));
@@ -994,6 +1388,15 @@ fieldset input {
     grid-template-columns: 1fr;
   }
 
+  .workflow-editor,
+  .workflow-step {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-column-headings {
+    display: none;
+  }
+
   .workflow-footer > button,
   .workflow-actions button {
     flex: 1;
@@ -1011,6 +1414,10 @@ fieldset input {
     grid-template-columns: 1fr;
   }
 
+  .timer-preset-grid {
+    grid-template-columns: 1fr;
+  }
+
   .row {
     grid-template-columns: 1fr;
   }
@@ -1024,7 +1431,7 @@ fieldset input {
   }
 
   .node-config-row {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .drag-handle {

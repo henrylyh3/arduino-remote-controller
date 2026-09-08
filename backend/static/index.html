@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local RF/IR Controller</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260907-13" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260908-22" />
   </head>
   <body>
     <header class="topbar">
@@ -40,53 +40,19 @@
           <div id="actionGrid" class="action-layout"></div>
         </section>
 
-        <section class="panel">
-          <h2>Add timer</h2>
-          <form id="timerForm" class="form compact-form">
-            <label>
-              Action
-              <select name="target" id="timerTarget" required></select>
-            </label>
-            <label class="timer-delay-desktop">
-              Delay in minutes
-              <input name="minutes" type="number" max="10080" step="any" value="30" required />
-            </label>
-            <div class="timer-delay-mobile" role="group" aria-label="Timer delay">
-              <label>
-                Minutes
-                <select name="mobile_minutes" id="timerMinutes"></select>
-              </label>
-              <label>
-                Seconds
-                <select name="mobile_seconds" id="timerSeconds"></select>
-              </label>
-            </div>
-            <button type="submit">Start timer</button>
-          </form>
-        </section>
-
-        <section class="panel">
-          <h2>Active jobs</h2>
-          <div id="activeJobList" class="list"></div>
+        <section class="panel span-full">
+          <div class="section-head">
+            <h2>Timers</h2>
+            <button id="addTimer" class="secondary icon-button add-icon-button" type="button" aria-label="Add timer" title="Add timer">+</button>
+          </div>
+          <div id="timerPresetList" class="timer-preset-grid"></div>
         </section>
 
         <section class="panel span-full">
-          <h2>Schedules</h2>
-          <form id="scheduleForm" class="schedule-form">
-            <select name="target" id="scheduleTarget" aria-label="Action" required></select>
-            <input name="name" autocomplete="off" aria-label="Schedule name" placeholder="Weekday night" />
-            <input name="time_of_day" type="time" aria-label="Start time" required />
-            <fieldset>
-              <label><input type="checkbox" name="days" value="0" checked /> Mon</label>
-              <label><input type="checkbox" name="days" value="1" checked /> Tue</label>
-              <label><input type="checkbox" name="days" value="2" checked /> Wed</label>
-              <label><input type="checkbox" name="days" value="3" checked /> Thu</label>
-              <label><input type="checkbox" name="days" value="4" checked /> Fri</label>
-              <label><input type="checkbox" name="days" value="5" /> Sat</label>
-              <label><input type="checkbox" name="days" value="6" /> Sun</label>
-            </fieldset>
-            <button type="submit">Save schedule</button>
-          </form>
+          <div class="section-head">
+            <h2>Schedules</h2>
+            <button id="addSchedule" class="secondary icon-button add-icon-button" type="button" aria-label="Add schedule" title="Add schedule">+</button>
+          </div>
           <div id="scheduleList" class="list"></div>
         </section>
 
@@ -96,22 +62,11 @@
     <div id="configurationPanel" class="tab-panel" role="tabpanel" aria-labelledby="configurationTab" hidden>
       <main class="layout configuration-layout">
         <section class="panel">
-          <h2>Add node</h2>
-          <form id="nodeForm" class="form">
-            <label>
-              Name
-              <input name="name" required autocomplete="off" placeholder="Bedroom ESP32" />
-            </label>
-            <label>
-              ESP32 IP
-              <input name="base_url" required autocomplete="off" placeholder="192.168.0.14" />
-            </label>
-            <button type="submit">Save node</button>
-          </form>
-          <div class="node-management">
-            <h3>Nodes</h3>
-            <div id="nodeList" class="node-list"></div>
+          <div class="section-head">
+            <h2>Node</h2>
+            <button id="addNode" class="secondary icon-button add-icon-button" type="button" aria-label="Add node" title="Add node">+</button>
           </div>
+          <div id="nodeList" class="node-list"></div>
         </section>
 
         <section class="panel">
@@ -122,13 +77,17 @@
                 Node
                 <select name="node_id" id="captureNode" required></select>
               </label>
-              <label>
-                Signal
-                <select name="signal_type" id="captureType" required>
-                  <option value="ir">IR raw</option>
-                  <option value="rf">RF 433MHz</option>
-                </select>
-              </label>
+              <fieldset class="signal-type-selector">
+                <legend>Signal</legend>
+                <label>
+                  <input type="radio" name="signal_type" value="ir" checked />
+                  <span>IR raw</span>
+                </label>
+                <label>
+                  <input type="radio" name="signal_type" value="rf" />
+                  <span>RF 433MHz</span>
+                </label>
+              </fieldset>
               <label>
                 Timeout seconds
                 <input name="timeout" type="number" min="1" max="30" value="8" />
@@ -159,20 +118,8 @@
         <section class="panel span-full">
           <div class="section-head">
             <h2>Workflows</h2>
+            <button id="addWorkflow" class="secondary icon-button add-icon-button" type="button" aria-label="Add workflow" title="Add workflow">+</button>
           </div>
-          <form id="workflowForm" class="form">
-            <div class="workflow-editor">
-              <input name="name" aria-label="Workflow name" autocomplete="off" placeholder="Workflow name" />
-              <div id="workflowSteps" class="workflow-steps"></div>
-            </div>
-            <div class="workflow-footer">
-              <button id="addWorkflowStep" class="secondary" type="button">Add step</button>
-              <div class="workflow-actions">
-                <button id="cancelWorkflowEdit" class="secondary" type="button" hidden>Cancel edit</button>
-                <button id="saveWorkflowButton" type="submit">Save workflow</button>
-              </div>
-            </div>
-          </form>
           <div id="workflowList" class="list"></div>
         </section>
       </main>
@@ -186,6 +133,134 @@
         </section>
       </main>
     </div>
+
+    <dialog id="timerDialog" class="form-dialog" aria-labelledby="timerDialogTitle">
+      <form id="timerForm" class="form-dialog-shell">
+        <header class="form-dialog-header">
+          <h2 id="timerDialogTitle">Add timer</h2>
+          <button id="closeTimerDialog" class="icon-button secondary" type="button" aria-label="Close timer editor" title="Close">&times;</button>
+        </header>
+        <label>
+          Action
+          <select name="target" id="timerTarget" class="action-select" required></select>
+        </label>
+        <label class="timer-delay-desktop">
+          Minute
+          <input name="minutes" type="number" min="0.0167" max="10080" step="any" value="30" required />
+        </label>
+        <div class="timer-delay-mobile" role="group" aria-label="Timer duration">
+          <label>
+            Minute
+            <select name="mobile_minutes" id="timerMinutes"></select>
+          </label>
+          <label>
+            Second
+            <select name="mobile_seconds" id="timerSeconds"></select>
+          </label>
+        </div>
+        <div class="form-dialog-actions">
+          <button id="cancelTimerDialog" class="secondary" type="button">Cancel</button>
+          <button id="saveTimer" type="submit">Save timer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="nodeDialog" class="form-dialog" aria-labelledby="nodeDialogTitle">
+      <form id="nodeForm" class="form-dialog-shell">
+        <header class="form-dialog-header">
+          <h2 id="nodeDialogTitle">Add node</h2>
+          <button id="closeNodeDialog" class="icon-button secondary" type="button" aria-label="Close node editor" title="Close">&times;</button>
+        </header>
+        <label>
+          Name
+          <input name="name" required autocomplete="off" maxlength="80" placeholder="Bedroom ESP32" />
+        </label>
+        <label>
+          ESP32 IP
+          <input name="base_url" required autocomplete="off" maxlength="200" placeholder="192.168.0.14" />
+        </label>
+        <div class="form-dialog-actions">
+          <button id="cancelNode" class="secondary" type="button">Cancel</button>
+          <button id="saveNode" type="submit">Save node</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="workflowDialog" class="form-dialog workflow-dialog" aria-labelledby="workflowDialogTitle">
+      <form id="workflowForm" class="form-dialog-shell">
+        <header class="form-dialog-header">
+          <h2 id="workflowDialogTitle">Add workflow</h2>
+          <button id="closeWorkflowDialog" class="icon-button secondary" type="button" aria-label="Close workflow editor" title="Close">&times;</button>
+        </header>
+        <div class="workflow-column-headings" aria-hidden="true">
+          <span>Name</span>
+          <div class="workflow-step-headings">
+            <span>Delay</span>
+            <span>Unit</span>
+            <span>Signal</span>
+            <span>Remove</span>
+          </div>
+        </div>
+        <div class="workflow-editor">
+          <input name="name" aria-label="Workflow name" required autocomplete="off" maxlength="80" placeholder="Workflow name" />
+          <div id="workflowSteps" class="workflow-steps"></div>
+        </div>
+        <div class="workflow-footer">
+          <button id="addWorkflowStep" class="secondary" type="button">Add step</button>
+          <div class="workflow-actions">
+            <button id="cancelWorkflowEdit" class="secondary" type="button">Cancel</button>
+            <button id="saveWorkflowButton" type="submit">Save workflow</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="scheduleDialog" class="form-dialog schedule-dialog" aria-labelledby="scheduleDialogTitle">
+      <form id="scheduleForm" class="form-dialog-shell schedule-dialog-shell">
+        <header class="form-dialog-header schedule-dialog-header">
+          <h2 id="scheduleDialogTitle">Add schedule</h2>
+          <button id="closeScheduleDialog" class="icon-button secondary" type="button" aria-label="Close schedule" title="Close">&times;</button>
+        </header>
+
+        <label>
+          Name
+          <input name="name" autocomplete="off" maxlength="80" placeholder="Weekday night" />
+        </label>
+        <label>
+          Action
+          <select name="target" id="scheduleTarget" class="action-select" required></select>
+        </label>
+        <label>
+          Start time
+          <input name="time_of_day" type="time" required />
+        </label>
+
+        <fieldset class="schedule-days">
+          <legend>Repeat</legend>
+          <label class="day-switch"><span>Mon</span><input class="switch-input" type="checkbox" role="switch" name="days" value="0" checked /><span class="switch-track" aria-hidden="true"></span></label>
+          <label class="day-switch"><span>Tue</span><input class="switch-input" type="checkbox" role="switch" name="days" value="1" checked /><span class="switch-track" aria-hidden="true"></span></label>
+          <label class="day-switch"><span>Wed</span><input class="switch-input" type="checkbox" role="switch" name="days" value="2" checked /><span class="switch-track" aria-hidden="true"></span></label>
+          <label class="day-switch"><span>Thu</span><input class="switch-input" type="checkbox" role="switch" name="days" value="3" checked /><span class="switch-track" aria-hidden="true"></span></label>
+          <label class="day-switch"><span>Fri</span><input class="switch-input" type="checkbox" role="switch" name="days" value="4" checked /><span class="switch-track" aria-hidden="true"></span></label>
+          <label class="day-switch"><span>Sat</span><input class="switch-input" type="checkbox" role="switch" name="days" value="5" /><span class="switch-track" aria-hidden="true"></span></label>
+          <label class="day-switch"><span>Sun</span><input class="switch-input" type="checkbox" role="switch" name="days" value="6" /><span class="switch-track" aria-hidden="true"></span></label>
+        </fieldset>
+
+        <label class="schedule-enabled-field">
+          <span>
+            <strong>Enabled</strong>
+            <small>Run this schedule automatically</small>
+          </span>
+          <input class="switch-input" type="checkbox" role="switch" name="enabled" checked />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+
+        <div class="form-dialog-actions schedule-dialog-actions">
+          <button id="cancelSchedule" class="secondary" type="button">Cancel</button>
+          <button id="saveSchedule" type="submit">Save schedule</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="acControllerDialog" class="ac-controller-dialog" aria-labelledby="acControllerTitle">
       <div class="ac-controller-shell">
@@ -240,6 +315,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=20260907-18" type="module"></script>
+    <script src="/static/app.js?v=20260908-28" type="module"></script>
   </body>
 </html>
