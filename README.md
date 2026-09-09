@@ -101,6 +101,37 @@ Important: keep the SYN115 transmitter and SYN480R receiver powered from ESP32 3
 
 ## Laptop setup
 
+### Standalone executable
+
+No Python installation or terminal command is needed to run a built executable.
+
+On macOS, double-click:
+
+```text
+backend/dist/Smart Home Controller.app
+```
+
+The app opens the dashboard in a native window and starts the server on port `8000`. Keep that window open while phones or ESP32 nodes use it. Closing the window or choosing `Quit` stops the server; it does not continue running invisibly in the background. The macOS build runs on Apple Silicon Macs; build again on an Intel Mac for an Intel-compatible app.
+
+The executable stores its working database here:
+
+```text
+~/Library/Application Support/Smart Home Controller/smart_home.sqlite3
+```
+
+On first launch, it copies the current `backend/smart_home.sqlite3` into that location. Later builds do not overwrite the working database.
+
+Build a fresh macOS application after changing the backend or frontend:
+
+```bash
+cd backend
+./build_executable.sh
+```
+
+Windows executables must be built on Windows. Run `backend\\build_executable.bat`; the result is `backend\\dist\\Smart Home Controller.exe`. Python is required only on the computer performing the build, not on computers running the resulting executable.
+
+### Development server
+
 ```bash
 cd backend
 python3 -m venv .venv
