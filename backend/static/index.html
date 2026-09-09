@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local RF/IR Controller</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260908-26" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260909-01" />
   </head>
   <body>
     <header class="topbar">
@@ -35,7 +35,7 @@
         <section class="panel span-full">
           <div class="section-head">
             <h2>Actions</h2>
-            <button id="refreshButton" class="secondary" type="button">Refresh</button>
+            <button id="refreshButton" class="secondary icon-button refresh-icon-button" type="button" aria-label="Refresh node status" title="Refresh"><span class="refresh-symbol" aria-hidden="true">&#8635;</span></button>
           </div>
           <div id="actionGrid" class="action-layout"></div>
         </section>
@@ -89,12 +89,12 @@
                 </label>
               </fieldset>
               <label class="capture-timeout-desktop">
-                Timeout seconds
+                Timeout (sec)
                 <input id="captureTimeout" name="timeout" type="number" min="1" max="30" value="8" />
               </label>
               <div class="capture-timeout-mobile roller-field">
-                <span>Timeout seconds</span>
-                <div class="roller-frame"><div id="captureTimeoutRoller" class="roller" role="listbox" tabindex="0" aria-label="Timeout seconds"></div></div>
+                <span>Timeout (sec)</span>
+                <div class="roller-frame"><div id="captureTimeoutRoller" class="roller" role="listbox" tabindex="0" aria-label="Timeout in sec"></div></div>
                 <input id="captureTimeoutMobile" type="hidden" value="8" />
               </div>
               <div class="capture-actions">
@@ -133,8 +133,8 @@
     <div id="logPanel" class="tab-panel" role="tabpanel" aria-labelledby="logTab" hidden>
       <main class="layout">
         <section class="panel span-full">
-          <h2>Event log</h2>
-          <div id="eventList" class="list"></div>
+          <div id="eventList" class="event-table-wrap"></div>
+          <nav id="eventPagination" class="event-pagination" aria-label="Event log pages"></nav>
         </section>
       </main>
     </div>
@@ -150,18 +150,18 @@
           <select name="target" id="timerTarget" class="action-select" required></select>
         </label>
         <label class="timer-delay-desktop">
-          Minute
+          Min
           <input name="minutes" type="number" min="0.0167" max="10080" step="any" value="30" required />
         </label>
         <div class="timer-delay-mobile" role="group" aria-label="Timer duration">
           <div class="roller-field">
-            <span>Minute</span>
-            <div class="roller-frame"><div id="timerMinuteRoller" class="roller" role="listbox" tabindex="0" aria-label="Minutes"></div></div>
+            <span>Min</span>
+            <div class="roller-frame"><div id="timerMinuteRoller" class="roller" role="listbox" tabindex="0" aria-label="Min"></div></div>
             <input name="mobile_minutes" id="timerMinutes" type="hidden" value="30" />
           </div>
           <div class="roller-field">
-            <span>Second</span>
-            <div class="roller-frame"><div id="timerSecondRoller" class="roller" role="listbox" tabindex="0" aria-label="Seconds"></div></div>
+            <span>Sec</span>
+            <div class="roller-frame"><div id="timerSecondRoller" class="roller" role="listbox" tabindex="0" aria-label="Sec"></div></div>
             <input name="mobile_seconds" id="timerSeconds" type="hidden" value="0" />
           </div>
         </div>
@@ -205,9 +205,9 @@
         </label>
         <div class="workflow-column-headings" aria-hidden="true">
           <div class="workflow-step-headings">
-            <span>Minute</span>
+            <span>Min</span>
             <span>Signal</span>
-            <span>Remove</span>
+            <span></span>
           </div>
         </div>
         <div id="workflowSteps" class="workflow-steps"></div>
@@ -242,14 +242,14 @@
         </label>
         <div class="schedule-time-mobile" role="group" aria-label="Start time">
           <div class="roller-field">
-            <span>Hour</span>
-            <div class="roller-frame"><div id="scheduleHourRoller" class="roller" role="listbox" tabindex="0" aria-label="Hour"></div></div>
+            <span>Hr</span>
+            <div class="roller-frame"><div id="scheduleHourRoller" class="roller" role="listbox" tabindex="0" aria-label="Hr"></div></div>
             <input id="scheduleHour" type="hidden" value="0" />
           </div>
           <div class="roller-separator" aria-hidden="true">:</div>
           <div class="roller-field">
-            <span>Minute</span>
-            <div class="roller-frame"><div id="scheduleMinuteRoller" class="roller" role="listbox" tabindex="0" aria-label="Minute"></div></div>
+            <span>Min</span>
+            <div class="roller-frame"><div id="scheduleMinuteRoller" class="roller" role="listbox" tabindex="0" aria-label="Min"></div></div>
             <input id="scheduleMinute" type="hidden" value="0" />
           </div>
         </div>
@@ -334,6 +334,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=20260908-30" type="module"></script>
+    <script src="/static/app.js?v=20260909-04" type="module"></script>
   </body>
 </html>

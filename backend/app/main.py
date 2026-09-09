@@ -822,6 +822,32 @@ def health() -> dict[str, Any]:
     return {"ok": True, "time_utc": utc_stamp(), "timezone": str(APP_TIMEZONE)}
 
 
+@app.get("/api/events")
+def events(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+) -> dict[str, Any]:
+    total_row = db.fetch_one("SELECT COUNT(*) AS total FROM events")
+    total = int(total_row["total"] if total_row else 0)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    current_page = min(page, total_pages)
+    items = db.fetch_all(
+        """
+        SELECT * FROM events
+        ORDER BY created_at DESC, id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (page_size, (current_page - 1) * page_size),
+    )
+    return {
+        "items": items,
+        "page": current_page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
+
+
 @app.get("/api/state")
 def state() -> dict[str, Any]:
     nodes = db.fetch_all("SELECT * FROM nodes ORDER BY sort_order, id")
@@ -838,7 +864,7 @@ def state() -> dict[str, Any]:
     workflow_run_steps = db.fetch_all(
         "SELECT * FROM workflow_run_steps ORDER BY run_id, step_order"
     )
-    events = db.fetch_all("SELECT * FROM events ORDER BY created_at DESC LIMIT 10")
+    events = db.fetch_all("SELECT * FROM events ORDER BY created_at DESC, id DESC LIMIT 10")
     stats = {
         row["button_id"]: row
         for row in db.fetch_all(

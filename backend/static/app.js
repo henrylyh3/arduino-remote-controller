@@ -27,6 +27,9 @@ let activeAcControllerId = null;
 let editingSchedule = null;
 let editingTimerId = null;
 let workflowStepKey = 0;
+let eventPage = 1;
+let eventTotalPages = 1;
+const eventPageSize = 10;
 
 const el = (id) => document.getElementById(id);
 
@@ -400,7 +403,7 @@ function formatDelay(seconds) {
   if (seconds === 0) return "immediate";
   if (seconds % 3600 === 0) {
     const hours = seconds / 3600;
-    return `${hours} hr${hours === 1 ? "" : "s"}`;
+    return `${hours} hr`;
   }
   if (seconds % 60 === 0) return `${seconds / 60} min`;
   return `${seconds} sec`;
@@ -1024,21 +1027,21 @@ function addWorkflowStepRow(delaySeconds = 30 * 60, buttonId = "") {
   const row = document.createElement("div");
   row.className = "workflow-step";
   row.innerHTML = `
-    <input class="workflow-delay-desktop" name="delay_minutes" aria-label="Delay in minutes" type="number" min="0" max="10080" step="any" value="${decimalMinutes}" required />
+    <input class="workflow-delay-desktop" name="delay_minutes" aria-label="Delay in min" type="number" min="0" max="10080" step="any" value="${decimalMinutes}" required />
     <div class="workflow-delay-mobile" role="group" aria-label="Delay">
       <div class="roller-field compact-roller-field">
         <span>Min</span>
-        <div class="roller-frame"><div id="workflowMinuteRoller${key}" class="roller" role="listbox" tabindex="0" aria-label="Delay minutes"></div></div>
+        <div class="roller-frame"><div id="workflowMinuteRoller${key}" class="roller" role="listbox" tabindex="0" aria-label="Delay min"></div></div>
         <input id="workflowMinutes${key}" type="hidden" value="${minutes}" />
       </div>
       <div class="roller-field compact-roller-field">
         <span>Sec</span>
-        <div class="roller-frame"><div id="workflowSecondRoller${key}" class="roller" role="listbox" tabindex="0" aria-label="Delay seconds"></div></div>
+        <div class="roller-frame"><div id="workflowSecondRoller${key}" class="roller" role="listbox" tabindex="0" aria-label="Delay sec"></div></div>
         <input id="workflowSeconds${key}" type="hidden" value="${seconds}" />
       </div>
     </div>
     <select name="button_id" aria-label="Signal" required></select>
-    <button class="secondary icon-button" type="button" data-remove-step aria-label="Remove workflow step" title="Remove step">${actionIcon("trash")}</button>
+    <button class="danger icon-button" type="button" data-remove-step aria-label="Remove workflow step" title="Remove step">${actionIcon("trash")}</button>
   `;
   el("workflowSteps").appendChild(row);
   const padded = (value) => String(value).padStart(2, "0");
@@ -1138,21 +1141,65 @@ function renderWorkflows() {
 
 function renderEvents() {
   const target = el("eventList");
+  const pagination = el("eventPagination");
   if (!state.events.length) {
     target.innerHTML = '<div class="empty">No events.</div>';
+    pagination.innerHTML = "";
     return;
   }
-  target.innerHTML = state.events
-    .map((event) => `
-      <div class="row">
-        <div>
-          <strong class="${event.status === "failed" ? "bad" : ""}">${escapeHtml(event.status)}</strong>
-          <div class="muted">${escapeHtml(event.created_at)}</div>
-          <span>${escapeHtml(event.message)}</span>
-        </div>
-      </div>
-    `)
-    .join("");
+  const dateFormatter = new Intl.DateTimeFormat("en-MY", {
+    timeZone: state.timezone || "Asia/Kuala_Lumpur",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const timeFormatter = new Intl.DateTimeFormat("en-MY", {
+    timeZone: state.timezone || "Asia/Kuala_Lumpur",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  target.innerHTML = `
+    <table class="event-table">
+      <thead>
+        <tr><th scope="col">Log</th><th scope="col">Date &amp; time (MYT)</th></tr>
+      </thead>
+      <tbody>
+        ${state.events.map((event) => {
+          const createdAt = new Date(event.created_at);
+          const failed = event.status === "failed";
+          return `
+            <tr class="event-row ${failed ? "event-row-failed" : "event-row-success"}">
+              <td>${escapeHtml(event.message)}</td>
+              <td class="event-time-cell">
+                <time datetime="${escapeHtml(event.created_at)}">
+                  <span>${escapeHtml(dateFormatter.format(createdAt))}</span>
+                  <span>${escapeHtml(timeFormatter.format(createdAt))}</span>
+                </time>
+              </td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+  pagination.innerHTML = eventTotalPages > 1 ? `
+    <button class="secondary icon-button pagination-icon-button" type="button" data-event-page="${eventPage - 1}" aria-label="Previous page" title="Previous page" ${eventPage === 1 ? "disabled" : ""}>&lt;</button>
+    <span>Page ${eventPage} of ${eventTotalPages}</span>
+    <button class="secondary icon-button pagination-icon-button" type="button" data-event-page="${eventPage + 1}" aria-label="Next page" title="Next page" ${eventPage === eventTotalPages ? "disabled" : ""}>&gt;</button>
+  ` : "";
+  pagination.querySelectorAll("[data-event-page]").forEach((button) => {
+    button.addEventListener("click", () => loadEvents(Number(button.dataset.eventPage)));
+  });
+}
+
+async function loadEvents(page = eventPage) {
+  const result = await api(`/api/events?page=${page}&page_size=${eventPageSize}`);
+  state.events = result.items;
+  eventPage = result.page;
+  eventTotalPages = result.total_pages;
+  renderEvents();
 }
 
 async function loadState() {
@@ -1168,7 +1215,7 @@ async function loadState() {
     renderNodeConfiguration();
     renderSignalConfiguration();
     renderWorkflows();
-    renderEvents();
+    await loadEvents(eventPage);
   } catch (error) {
     el("apiStatus").textContent = "Offline";
     showToast(error.message, true);
@@ -1262,7 +1309,7 @@ el("refreshButton").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
   button.classList.add("is-loading");
-  button.textContent = "Checking...";
+  button.setAttribute("aria-label", "Checking node status");
   try {
     const result = await api("/api/node-health/refresh", { method: "POST" });
     await loadState();
@@ -1272,7 +1319,7 @@ el("refreshButton").addEventListener("click", async (event) => {
   } finally {
     button.disabled = false;
     button.classList.remove("is-loading");
-    button.textContent = "Refresh";
+    button.setAttribute("aria-label", "Refresh node status");
   }
 });
 el("addWorkflowStep").addEventListener("click", () => addWorkflowStepRow());
@@ -1341,7 +1388,7 @@ el("startCapture").addEventListener("click", async () => {
   const signalLabel = body.signal_type === "ir" ? "IR" : "RF";
   const updateCaptureMessage = () => {
     const secondsRemaining = Math.max(0, Math.ceil((captureDeadline - Date.now()) / 1000));
-    showToast(`Capturing ${signalLabel} signal - ${secondsRemaining > 0 ? `${secondsRemaining}s remaining` : "finishing"}`, false, 0);
+    showToast(`Capturing ${signalLabel} signal - ${secondsRemaining > 0 ? `${secondsRemaining} sec remaining` : "finishing"}`, false, 0);
   };
   let captureCountdown;
   try {
