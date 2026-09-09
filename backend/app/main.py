@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -76,6 +76,10 @@ class AcControllerCommandIn(BaseModel):
     fan: Literal["auto", "1", "2", "3"]
     swing: bool
     power_toggle: bool = False
+
+
+class AcControllerUpdateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
 
 
 class SignalUpdateIn(BaseModel):
@@ -168,6 +172,40 @@ def clean_base_url(value: str) -> str:
     if not base_url.startswith(("http://", "https://")):
         base_url = f"http://{base_url}"
     return base_url
+
+
+def controller_slug_base(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-") or "controller"
+
+
+def controller_navigation() -> list[dict[str, Any]]:
+    controllers = db.fetch_all("SELECT id, name FROM ac_controllers ORDER BY id")
+    bases = [controller_slug_base(controller["name"]) for controller in controllers]
+    counts = {base: bases.count(base) for base in set(bases)}
+    for controller, base in zip(controllers, bases):
+        controller["slug"] = base if counts[base] == 1 else f"{base}-{controller['id']}"
+    return controllers
+
+
+def controller_details(controller_id: int) -> dict[str, Any] | None:
+    controller = db.fetch_one(
+        """
+        SELECT ac_controllers.*, nodes.name AS node_name, nodes.enabled AS node_enabled
+        FROM ac_controllers
+        JOIN nodes ON nodes.id = ac_controllers.node_id
+        WHERE ac_controllers.id = ?
+        """,
+        (controller_id,),
+    )
+    if not controller:
+        return None
+    controller["swing"] = bool(controller["swing"])
+    controller["node_enabled"] = bool(controller["node_enabled"])
+    controller["health"] = node_health_cache.get(
+        controller["node_id"],
+        {"status": "unknown", "checked_at": None, "latency_ms": None},
+    )
+    return controller
 
 
 def json_dumps(value: Any) -> str:
@@ -817,6 +855,24 @@ def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/{controller_id:int}")
+def legacy_controller_page(controller_id: int) -> RedirectResponse:
+    controller = next(
+        (item for item in controller_navigation() if item["id"] == controller_id),
+        None,
+    )
+    if not controller:
+        raise HTTPException(status_code=404, detail="Aircond controller not found")
+    return RedirectResponse(url=f"/{controller['slug']}", status_code=307)
+
+
+@app.get("/{controller_slug}")
+def controller_page(controller_slug: str) -> FileResponse:
+    if not any(item["slug"] == controller_slug for item in controller_navigation()):
+        raise HTTPException(status_code=404, detail="Aircond controller not found")
+    return FileResponse(STATIC_DIR / "controller.html")
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "time_utc": utc_stamp(), "timezone": str(APP_TIMEZONE)}
@@ -904,6 +960,9 @@ def state() -> dict[str, Any]:
         workflow["starred"] = bool(workflow["starred"])
     for controller in ac_controllers:
         controller["swing"] = bool(controller["swing"])
+    controller_slugs = {item["id"]: item["slug"] for item in controller_navigation()}
+    for controller in ac_controllers:
+        controller["slug"] = controller_slugs[controller["id"]]
     return {
         "nodes": nodes,
         "devices": devices,
@@ -1066,6 +1125,55 @@ async def press_button(button_id: int) -> dict[str, Any]:
             (button_id, "failed", str(exc)),
         )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/controller-pages/{controller_slug}")
+def get_ac_controller_page(controller_slug: str) -> dict[str, Any]:
+    controllers = controller_navigation()
+    selected = next((item for item in controllers if item["slug"] == controller_slug), None)
+    if not selected:
+        raise HTTPException(status_code=404, detail="Aircond controller not found")
+    controller = controller_details(selected["id"])
+    if not controller:
+        raise HTTPException(status_code=404, detail="Aircond controller not found")
+    controller["slug"] = selected["slug"]
+    return {
+        "controller": controller,
+        "controllers": controllers,
+        "timezone": str(APP_TIMEZONE),
+    }
+
+
+@app.get("/api/ac-controllers/{controller_id}")
+def get_ac_controller(controller_id: int) -> dict[str, Any]:
+    controller = controller_details(controller_id)
+    if not controller:
+        raise HTTPException(status_code=404, detail="Aircond controller not found")
+    controllers = controller_navigation()
+    controller["slug"] = next(item["slug"] for item in controllers if item["id"] == controller_id)
+    return {
+        "controller": controller,
+        "controllers": controllers,
+        "timezone": str(APP_TIMEZONE),
+    }
+
+
+@app.put("/api/ac-controllers/{controller_id}")
+def update_ac_controller(controller_id: int, update: AcControllerUpdateIn) -> dict[str, Any]:
+    if not db.fetch_one("SELECT id FROM ac_controllers WHERE id = ?", (controller_id,)):
+        raise HTTPException(status_code=404, detail="Aircond controller not found")
+    name = update.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Controller name is required")
+    db.execute("UPDATE ac_controllers SET name = ? WHERE id = ?", (name, controller_id))
+    controllers = controller_navigation()
+    controller = next(item for item in controllers if item["id"] == controller_id)
+    return {
+        "id": controller_id,
+        "name": name,
+        "slug": controller["slug"],
+        "controllers": controllers,
+    }
 
 
 @app.post("/api/ac-controllers/{controller_id}/send")

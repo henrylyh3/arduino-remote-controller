@@ -113,6 +113,14 @@ function workflowSteps(workflowId) {
     .sort((a, b) => a.step_order - b.step_order);
 }
 
+function renderControllerTabs() {
+  el("controllerTabs").innerHTML = state.ac_controllers
+    .map((controller) => `
+      <a class="tab" href="/${controller.slug}" role="tab" aria-selected="false">${escapeHtml(controller.name)}</a>
+    `)
+    .join("");
+}
+
 function groupSignalsByNode(buttons) {
   return state.nodes
     .map((node) => {
@@ -1208,6 +1216,7 @@ async function loadState() {
     Object.assign(state, nextState);
     el("apiStatus").textContent = `${state.nodes.length} nodes - ${actions().length + state.ac_controllers.length} actions`;
     el("clock").textContent = state.timezone;
+    renderControllerTabs();
     updateSelectors();
     renderActions();
     renderTimerPresets();

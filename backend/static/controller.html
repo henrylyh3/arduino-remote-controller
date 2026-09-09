@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aircond controller</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260909-05" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local RF/IR</p>
+        <h1>Smart-home controller</h1>
+      </div>
+      <div class="status">
+        <span id="apiStatus" class="pill">Loading</span>
+        <span id="clock" class="muted"></span>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Controller sections">
+      <a class="tab" href="/#control" role="tab" aria-selected="false">Control</a>
+      <a class="tab" href="/#configuration" role="tab" aria-selected="false">Configuration</a>
+      <a class="tab" href="/#log" role="tab" aria-selected="false">Log</a>
+      <span id="controllerTabs" class="controller-nav-tabs"></span>
+    </nav>
+
+    <div class="tab-panel" role="tabpanel">
+      <main class="layout controller-tab-layout">
+        <section class="panel span-full controller-host-panel">
+          <div id="controllerMessage" class="controller-tab-message">Loading controller...</div>
+
+          <div id="controllerPanel" class="controller-tab-content ac-controller-shell" aria-labelledby="controllerTitle" hidden>
+            <header class="ac-controller-header">
+              <div>
+                <p class="eyebrow controller-tab-node">
+                  <span id="controllerNodeStatus" class="node-status-dot" aria-hidden="true"></span>
+                  <span id="controllerNodeName">Node</span>
+                </p>
+                <h2 id="controllerTitle">Aircond controller</h2>
+              </div>
+              <button id="renameController" class="secondary" type="button">Rename</button>
+            </header>
+
+            <div class="ac-display" aria-live="polite">
+              <span>COOL</span>
+              <output id="controllerTemperatureDisplay">27&deg;</output>
+              <div id="controllerDisplaySummary">Fan 1 &middot; Swing off</div>
+            </div>
+
+            <section class="ac-control-section" aria-labelledby="controllerTemperatureLabel">
+              <h3 id="controllerTemperatureLabel">Temperature</h3>
+              <div class="temperature-control">
+                <button id="controllerTemperatureDown" class="secondary" type="button" aria-label="Decrease temperature">&minus;</button>
+                <strong id="controllerTemperatureValue">27&deg;C</strong>
+                <button id="controllerTemperatureUp" class="secondary" type="button" aria-label="Increase temperature">+</button>
+              </div>
+            </section>
+
+            <section class="ac-control-section" aria-labelledby="controllerFanLabel">
+              <h3 id="controllerFanLabel">Fan</h3>
+              <div class="ac-segmented" role="group" aria-label="Fan speed">
+                <button type="button" data-controller-fan="auto">Auto</button>
+                <button type="button" data-controller-fan="1">1</button>
+                <button type="button" data-controller-fan="2">2</button>
+                <button type="button" data-controller-fan="3">3</button>
+              </div>
+            </section>
+
+            <label class="ac-switch-row" for="controllerSwing">
+              <span>
+                <strong>Swing</strong>
+                <small>Vertical airflow</small>
+              </span>
+              <input id="controllerSwing" type="checkbox" role="switch" />
+            </label>
+
+            <button id="controllerPower" class="ac-power-button" type="button">
+              <span class="power-symbol" aria-hidden="true">&#9211;</span>
+              Power toggle
+            </button>
+
+            <p id="controllerLastSent" class="ac-last-sent">No command sent yet</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="controllerNameDialog" class="form-dialog" aria-labelledby="controllerNameDialogTitle">
+      <form id="controllerNameForm" class="form-dialog-shell">
+        <header class="form-dialog-header">
+          <h2 id="controllerNameDialogTitle">Rename controller</h2>
+          <button id="closeControllerNameDialog" class="icon-button secondary" type="button" aria-label="Close controller name editor" title="Close">&times;</button>
+        </header>
+        <label>
+          Name
+          <input id="controllerName" name="name" maxlength="80" required />
+        </label>
+        <div class="form-dialog-actions">
+          <button id="cancelControllerName" class="secondary" type="button">Cancel</button>
+          <button id="saveControllerName" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="controllerToast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/static/controller.js?v=20260909-03" type="module"></script>
+  </body>
+</html>

@@ -145,7 +145,12 @@ The dashboard has three tabs:
 
 - `Control`: run saved signals or workflows, add timers, add schedules, and view active jobs.
 - `Configuration`: add nodes, learn/rename/delete signals, and create/edit/delete workflows.
-- `Log`: view the 10 most recent controller events.
+- `Log`: view controller events newest-first, 10 per page.
+
+Each air-conditioner controller has a name-based page, such as
+`http://127.0.0.1:8000/nicole`. From another device, replace `127.0.0.1` with the
+host laptop's local IP address. Controller names appear as navigation tabs and can
+be renamed from their controller page. Dashboard controller tiles continue to open the popup.
 
 Signals and workflows are both actions. The same timer and schedule forms can target either one; only workflows contain multiple steps.
 The node list under `Configuration` supports renaming, guarded deletion, and desktop drag-and-drop ordering. The drag grip is hidden on mobile. Node order is shared by Configuration and Control signal tabs.
