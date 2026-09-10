@@ -14,6 +14,7 @@ const uint8_t RF_TX_PIN = 26;
 const uint8_t RF_RX_PIN = 27;
 const uint8_t IR_TX_PIN = 4;
 const uint8_t IR_RX_PIN = 14;
+const unsigned long WIFI_RECONNECT_INTERVAL_MS = 5000;
 const uint8_t CONFIG_RESET_PIN = 0;
 
 const uint16_t IR_CAPTURE_BUFFER = 1024;
@@ -32,6 +33,7 @@ String wifiSsid;
 String wifiPassword;
 String nodeName = DEFAULT_NODE_NAME;
 bool setupMode = false;
+unsigned long lastWifiReconnectAttempt = 0;
 
 String jsonEscape(const String &value) {
   String escaped;
@@ -162,6 +164,50 @@ void handleSendRF() {
   sendJson(200, body);
 }
 
+void handleSendRFRaw() {
+  String body = server.arg("plain");
+  if (body.length() == 0) {
+    sendError(400, "missing raw body");
+    return;
+  }
+
+  std::vector<uint16_t> raw;
+  if (!parseRawCsv(body, raw) || raw.size() < 3) {
+    sendError(400, "raw body must contain comma-separated positive microseconds");
+    return;
+  }
+
+  int repeat = static_cast<int>(argUL("repeat", 6));
+  uint16_t syncHigh = static_cast<uint16_t>(argUL("sync_high", 0));
+  if (repeat < 1 || repeat > 50 || syncHigh == 0) {
+    sendError(400, "repeat must be 1-50 and sync_high is required");
+    return;
+  }
+
+  rfRx.disableReceive();
+  digitalWrite(RF_TX_PIN, LOW);
+  delayMicroseconds(raw[0]);
+  for (int sent = 0; sent < repeat; sent++) {
+    for (size_t i = 1; i < raw.size(); i++) {
+      digitalWrite(RF_TX_PIN, (i % 2 == 1) ? HIGH : LOW);
+      delayMicroseconds(raw[i]);
+    }
+    digitalWrite(RF_TX_PIN, HIGH);
+    delayMicroseconds(syncHigh);
+    digitalWrite(RF_TX_PIN, LOW);
+    if (sent + 1 < repeat) delayMicroseconds(raw[0]);
+  }
+  digitalWrite(RF_TX_PIN, LOW);
+  rfRx.enableReceive(digitalPinToInterrupt(RF_RX_PIN));
+
+  String response = "{\"ok\":true,\"signal_type\":\"rf_raw\",\"count\":";
+  response += String(raw.size());
+  response += ",\"repeat\":";
+  response += String(repeat);
+  response += "}";
+  sendJson(200, response);
+}
+
 void handleSendIRRaw() {
   String body = server.arg("plain");
   if (body.length() == 0) {
@@ -230,6 +276,68 @@ void handleCaptureRF() {
   sendError(408, "rf capture timeout");
 }
 
+void handleCaptureRFRaw() {
+  unsigned long timeoutMs = argUL("timeout_ms", 15000);
+  unsigned long started = millis();
+  rfRx.resetAvailable();
+
+  while (millis() - started < timeoutMs) {
+    if (!server.client().connected()) {
+      rfRx.resetAvailable();
+      return;
+    }
+    if (rfRx.available()) {
+      unsigned long code = rfRx.getReceivedValue();
+      unsigned int bits = rfRx.getReceivedBitlength();
+      unsigned int protocol = rfRx.getReceivedProtocol();
+      unsigned int pulseLength = rfRx.getReceivedDelay();
+      unsigned int rawCount = min(bits * 2 + 1, static_cast<unsigned int>(RCSWITCH_MAX_CHANGES));
+      unsigned int *captured = rfRx.getReceivedRawdata();
+      std::vector<uint16_t> raw(captured, captured + rawCount);
+      rfRx.resetAvailable();
+
+      if (code == 0) {
+        sendError(422, "unknown rf encoding");
+        return;
+      }
+
+      unsigned long shortPulseTotal = 0;
+      unsigned int shortPulseCount = 0;
+      for (size_t i = 1; i + 1 < raw.size(); i += 2) {
+        shortPulseTotal += min(raw[i], raw[i + 1]);
+        shortPulseCount++;
+      }
+      unsigned int rawBasePulse = shortPulseCount > 0
+                                      ? shortPulseTotal / shortPulseCount
+                                      : pulseLength;
+
+      String body = "{\"signal_type\":\"rf_raw\",\"code\":";
+      body += String(code);
+      body += ",\"bits\":";
+      body += String(bits);
+      body += ",\"protocol\":";
+      body += String(protocol);
+      body += ",\"pulse_length\":";
+      body += String(pulseLength);
+      body += ",\"raw_base_pulse\":";
+      body += String(rawBasePulse);
+      body += ",\"sync_high\":";
+      body += String(rawBasePulse);
+      body += ",\"raw\":[";
+      for (size_t i = 0; i < raw.size(); i++) {
+        if (i > 0) body += ',';
+        body += String(raw[i]);
+      }
+      body += "]}";
+      sendJson(200, body);
+      return;
+    }
+    delay(5);
+  }
+
+  sendError(408, "rf raw capture timeout");
+}
+
 void handleCaptureIR() {
   unsigned long timeoutMs = argUL("timeout_ms", 10000);
   unsigned long started = millis();
@@ -280,6 +388,8 @@ bool connectWifi() {
   if (wifiSsid.length() == 0) return false;
 
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
   Serial.print("WiFi");
   unsigned long started = millis();
@@ -301,8 +411,10 @@ void registerApiRoutes() {
   server.on("/", HTTP_GET, handleHealth);
   server.on("/health", HTTP_GET, handleHealth);
   server.on("/send/rf", HTTP_GET, handleSendRF);
+  server.on("/send/rf/raw", HTTP_POST, handleSendRFRaw);
   server.on("/send/ir/raw", HTTP_POST, handleSendIRRaw);
   server.on("/capture/rf", HTTP_GET, handleCaptureRF);
+  server.on("/capture/rf/raw", HTTP_GET, handleCaptureRFRaw);
   server.on("/capture/ir", HTTP_GET, handleCaptureIR);
   server.onNotFound(handleNotFound);
 }
@@ -349,5 +461,11 @@ void setup() {
 }
 
 void loop() {
+  if (!setupMode && WiFi.status() != WL_CONNECTED &&
+      millis() - lastWifiReconnectAttempt >= WIFI_RECONNECT_INTERVAL_MS) {
+    lastWifiReconnectAttempt = millis();
+    Serial.println("WiFi disconnected; reconnecting");
+    WiFi.reconnect();
+  }
   server.handleClient();
 }

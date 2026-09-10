@@ -24,6 +24,7 @@ let draggedNodeId = null;
 let activeCapture = null;
 let pendingCapturedSignal = null;
 let activeAcControllerId = null;
+let activeAcControllerNodeId = null;
 let editingSchedule = null;
 let editingTimerId = null;
 let workflowStepKey = 0;
@@ -135,9 +136,8 @@ function controlSignalGroups(buttons) {
     .map((node) => ({
       node,
       buttons: buttons.filter((button) => buttonContext(button).node?.id === node.id),
-      controller: state.ac_controllers.find((item) => item.node_id === node.id) || null,
     }))
-    .filter((group) => group.buttons.length || group.controller);
+    .filter((group) => group.buttons.length);
 }
 
 function nodeTabs(groups, selectedNodeId, dataAttribute, label, disableInactive = false) {
@@ -241,10 +241,11 @@ async function runAction(kind, id) {
 
 function renderActions() {
   const grid = el("actionGrid");
+  const controllers = state.ac_controllers;
   const starredWorkflows = state.workflows.filter((workflow) => workflow.starred);
   const starredSignals = state.buttons.filter((button) => button.starred);
   const signalGroups = controlSignalGroups(starredSignals);
-  if (!starredWorkflows.length && !signalGroups.length) {
+  if (!controllers.length && !starredWorkflows.length && !signalGroups.length) {
     grid.innerHTML = '<div class="empty">No starred actions. Star one under Configuration.</div>';
     return;
   }
@@ -254,6 +255,23 @@ function renderActions() {
     selectedActionNodeId = onlineSignalGroups[0]?.node.id || null;
   }
   const selectedGroup = onlineSignalGroups.find((group) => group.node.id === selectedActionNodeId);
+  const controllersHtml = controllers.length
+    ? `
+      <section class="action-section">
+        <h3>Controllers</h3>
+        <div class="action-tile-grid">
+          ${controllers
+            .map((controller) => `
+              <button class="button-tile ac-controller-tile" type="button" data-ac-controller-id="${controller.id}">
+                ${escapeHtml(controller.name)}
+                <span>${escapeHtml(controller.brand)} &middot; ${controller.power ? "On" : "Off"} &middot; ${controller.temperature}&deg;C &middot; Fan ${escapeHtml(fanLabel(controller.fan))} &middot; Swing ${controller.swing ? "Auto" : "Fixed"}</span>
+              </button>
+            `)
+            .join("")}
+        </div>
+      </section>
+    `
+    : "";
   const workflowHtml = starredWorkflows.length
     ? `
       <section class="action-section">
@@ -281,12 +299,6 @@ function renderActions() {
         ${nodeTabs(signalGroups, selectedActionNodeId, "data-action-node-tab", "Signal nodes", true)}
         <div class="action-tile-grid node-tab-content" role="tabpanel">
           ${selectedGroup ? `
-            ${selectedGroup.controller ? `
-              <button class="button-tile ac-controller-tile" type="button" data-ac-controller-id="${selectedGroup.controller.id}">
-                ${escapeHtml(selectedGroup.controller.name)}
-                <span>${selectedGroup.controller.temperature}&deg;C &middot; Fan ${escapeHtml(selectedGroup.controller.fan === "auto" ? "Auto" : selectedGroup.controller.fan)} &middot; Swing ${selectedGroup.controller.swing ? "on" : "off"}</span>
-              </button>
-            ` : ""}
             ${selectedGroup.buttons.map((button) => {
               const count = button.stats?.press_count || 0;
               return `
@@ -302,7 +314,7 @@ function renderActions() {
       </section>
     `
     : "";
-  grid.innerHTML = workflowHtml + signalsHtml;
+  grid.innerHTML = controllersHtml + workflowHtml + signalsHtml;
 
   grid.querySelectorAll("[data-action-node-tab]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -339,20 +351,46 @@ function fanLabel(fan) {
   return fan === "auto" ? "Auto" : fan;
 }
 
+function activeAcControllerNode() {
+  return state.nodes.find((node) => node.id === activeAcControllerNodeId) || null;
+}
+
+function acControllerNodeOptions() {
+  if (!state.nodes.length) return '<option value="">No nodes configured</option>';
+  return state.nodes
+    .map((node) => {
+      const status = node.health?.status || "unknown";
+      const selected = node.id === activeAcControllerNodeId ? " selected" : "";
+      return `<option value="${node.id}"${selected}>${escapeHtml(node.name)} - ${escapeHtml(status)}</option>`;
+    })
+    .join("");
+}
+
 function renderAcController() {
   const controller = activeAcController();
   if (!controller) return;
+  const node = activeAcControllerNode();
+  const status = node?.health?.status || "unknown";
+  const canSend = Boolean(node?.enabled) && status === "online";
   el("acTemperatureDisplay").innerHTML = `${controller.temperature}&deg;`;
   el("acTemperatureValue").innerHTML = `${controller.temperature}&deg;C`;
-  el("acDisplaySummary").textContent = `Fan ${fanLabel(controller.fan)} · Swing ${controller.swing ? "on" : "off"}`;
-  el("decreaseAcTemperature").disabled = controller.temperature <= 16;
-  el("increaseAcTemperature").disabled = controller.temperature >= 30;
+  el("acControllerMeta").textContent = controller.brand;
+  el("acNode").innerHTML = acControllerNodeOptions();
+  el("acNodeStatus").className = `node-status-dot node-status-${status}`;
+  el("acNodeField").setAttribute("aria-label", node ? `${node.name} ${status}` : "No node selected");
+  el("acDisplaySummary").textContent = `${controller.power ? "ON" : "OFF"} · Fan ${fanLabel(controller.fan)} · Swing ${controller.swing ? "Auto" : "Fixed"}`;
+  el("decreaseAcTemperature").disabled = !canSend || controller.temperature <= 16;
+  el("increaseAcTemperature").disabled = !canSend || controller.temperature >= 30;
   el("acSwing").checked = controller.swing;
+  el("acPowerLabel").textContent = controller.power ? "Turn off" : "Turn on";
   document.querySelectorAll("[data-ac-fan]").forEach((button) => {
     const selected = button.dataset.acFan === controller.fan;
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-pressed", String(selected));
+    button.disabled = !canSend;
   });
+  el("acSwing").disabled = !canSend;
+  el("acPower").disabled = !canSend;
   el("acLastSent").textContent = controller.last_sent_at
     ? `Last sent: ${controller.last_command} · ${new Date(controller.last_sent_at).toLocaleString()}`
     : "No command sent yet";
@@ -360,6 +398,11 @@ function renderAcController() {
 
 function openAcController(controllerId) {
   activeAcControllerId = controllerId;
+  const controller = activeAcController();
+  activeAcControllerNodeId = controller?.last_node_id
+    || state.nodes.find((node) => node.health?.status === "online" && node.enabled)?.id
+    || state.nodes[0]?.id
+    || null;
   renderAcController();
   el("acControllerDialog").showModal();
 }
@@ -367,7 +410,7 @@ function openAcController(controllerId) {
 function setAcControllerBusy(busy) {
   const dialog = el("acControllerDialog");
   dialog.setAttribute("aria-busy", String(busy));
-  dialog.querySelectorAll("button, input").forEach((control) => {
+  dialog.querySelectorAll("button, input, select").forEach((control) => {
     control.disabled = busy;
   });
   if (!busy) renderAcController();
@@ -377,6 +420,7 @@ async function sendAcController(changes = {}, powerToggle = false) {
   const controller = activeAcController();
   if (!controller) return;
   const command = {
+    node_id: activeAcControllerNodeId,
     temperature: controller.temperature,
     fan: controller.fan,
     swing: controller.swing,
@@ -391,6 +435,7 @@ async function sendAcController(changes = {}, powerToggle = false) {
     });
     const index = state.ac_controllers.findIndex((item) => item.id === controller.id);
     state.ac_controllers[index] = result.controller;
+    activeAcControllerNodeId = result.controller.last_node_id;
     renderAcController();
     renderActions();
     showToast(result.message);
@@ -1257,6 +1302,11 @@ el("acControllerDialog").addEventListener("click", (event) => {
 });
 el("acControllerDialog").addEventListener("close", () => {
   activeAcControllerId = null;
+  activeAcControllerNodeId = null;
+});
+el("acNode").addEventListener("change", (event) => {
+  activeAcControllerNodeId = Number(event.currentTarget.value) || null;
+  renderAcController();
 });
 el("decreaseAcTemperature").addEventListener("click", () => {
   const controller = activeAcController();

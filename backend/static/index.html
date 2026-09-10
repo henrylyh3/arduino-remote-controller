@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local RF/IR Controller</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260909-05" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260910-03" />
   </head>
   <body>
     <header class="topbar">
@@ -286,16 +286,21 @@
       <div class="ac-controller-shell">
         <header class="ac-controller-header">
           <div>
-            <p class="eyebrow">Bedroom</p>
+            <p id="acControllerMeta" class="eyebrow">Brand</p>
             <h2 id="acControllerTitle">Aircond controller</h2>
           </div>
           <button id="closeAcController" class="icon-button secondary" type="button" aria-label="Close aircond controller" title="Close">&times;</button>
         </header>
 
+        <label id="acNodeField" class="ac-node-field" for="acNode">
+          <span><span id="acNodeStatus" class="node-status-dot node-status-unknown" aria-hidden="true"></span>Send to node</span>
+          <select id="acNode"></select>
+        </label>
+
         <div class="ac-display" aria-live="polite">
           <span>COOL</span>
           <output id="acTemperatureDisplay">27&deg;</output>
-          <div id="acDisplaySummary">Fan 1 &middot; Swing off</div>
+          <div id="acDisplaySummary">OFF &middot; Fan Auto &middot; Swing Auto</div>
         </div>
 
         <section class="ac-control-section" aria-labelledby="acTemperatureLabel">
@@ -319,15 +324,15 @@
 
         <label class="ac-switch-row" for="acSwing">
           <span>
-            <strong>Swing</strong>
-            <small>Vertical airflow</small>
+            <strong>Swing auto</strong>
+            <small>Off uses fixed centre position</small>
           </span>
           <input id="acSwing" type="checkbox" role="switch" />
         </label>
 
         <button id="acPower" class="ac-power-button" type="button">
           <span class="power-symbol" aria-hidden="true">&#9211;</span>
-          Power toggle
+          <span id="acPowerLabel">Turn on</span>
         </button>
 
         <p id="acLastSent" class="ac-last-sent">No command sent yet</p>
@@ -335,6 +340,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/app.js?v=20260909-08" type="module"></script>
+    <script src="/static/app.js?v=20260910-03" type="module"></script>
   </body>
 </html>

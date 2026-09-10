@@ -1,240 +1,273 @@
 from __future__ import annotations
 
 import os
-import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-DB_PATH = Path(os.environ.get("SMART_HOME_DB", Path(__file__).resolve().parents[1] / "smart_home.sqlite3"))
+from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
+from pymongo.collection import Collection
+from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
 
 
-SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS nodes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    room TEXT NOT NULL DEFAULT '',
-    base_url TEXT NOT NULL UNIQUE,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    last_seen TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS devices (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    room TEXT NOT NULL DEFAULT '',
-    kind TEXT NOT NULL CHECK(kind IN ('rf_fan', 'ir_ac', 'other')),
-    notes TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS buttons (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    signal_type TEXT NOT NULL CHECK(signal_type IN ('rf', 'ir')),
-    payload TEXT NOT NULL,
-    starred INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS timers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    button_id INTEGER NOT NULL REFERENCES buttons(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    run_at_utc TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'done', 'failed', 'cancelled')) DEFAULT 'pending',
-    error TEXT,
-    fired_at_utc TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS schedules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    button_id INTEGER NOT NULL REFERENCES buttons(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    time_of_day TEXT NOT NULL,
-    days TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    last_run_date TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS workflows (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    starred INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS timer_presets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    button_id INTEGER REFERENCES buttons(id) ON DELETE CASCADE,
-    workflow_id INTEGER REFERENCES workflows(id) ON DELETE CASCADE,
-    duration_seconds INTEGER NOT NULL CHECK(duration_seconds > 0 AND duration_seconds <= 604800),
-    run_at_utc TEXT,
-    active INTEGER NOT NULL DEFAULT 0,
-    error TEXT,
-    legacy_timer_id INTEGER UNIQUE REFERENCES timers(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    CHECK((button_id IS NOT NULL AND workflow_id IS NULL) OR
-          (button_id IS NULL AND workflow_id IS NOT NULL)),
-    CHECK((active = 0 AND run_at_utc IS NULL) OR
-          (active = 1 AND run_at_utc IS NOT NULL))
-);
-
-CREATE TABLE IF NOT EXISTS workflow_steps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-    step_order INTEGER NOT NULL,
-    button_id INTEGER NOT NULL REFERENCES buttons(id) ON DELETE CASCADE,
-    delay_seconds INTEGER NOT NULL CHECK(delay_seconds >= 0 AND delay_seconds <= 604800),
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE(workflow_id, step_order)
-);
-
-CREATE TABLE IF NOT EXISTS workflow_schedules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    time_of_day TEXT NOT NULL,
-    days TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    last_run_date TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS workflow_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'done', 'failed', 'cancelled')) DEFAULT 'pending',
-    error TEXT,
-    started_at_utc TEXT,
-    finished_at_utc TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS workflow_run_steps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
-    workflow_step_id INTEGER REFERENCES workflow_steps(id) ON DELETE SET NULL,
-    step_order INTEGER NOT NULL,
-    button_id INTEGER NOT NULL REFERENCES buttons(id) ON DELETE CASCADE,
-    delay_seconds INTEGER NOT NULL CHECK(delay_seconds >= 0 AND delay_seconds <= 604800),
-    run_after_utc TEXT,
-    status TEXT NOT NULL CHECK(status IN ('waiting', 'pending', 'running', 'done', 'failed', 'cancelled')) DEFAULT 'waiting',
-    error TEXT,
-    fired_at_utc TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE(run_id, step_order)
-);
-
-CREATE TABLE IF NOT EXISTS ac_controllers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id INTEGER NOT NULL UNIQUE REFERENCES nodes(id) ON DELETE CASCADE,
-    name TEXT NOT NULL DEFAULT 'Aircond controller',
-    temperature INTEGER NOT NULL DEFAULT 27 CHECK(temperature BETWEEN 16 AND 30),
-    fan TEXT NOT NULL DEFAULT '1' CHECK(fan IN ('auto', '1', '2', '3')),
-    swing INTEGER NOT NULL DEFAULT 0,
-    last_command TEXT,
-    last_sent_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    button_id INTEGER REFERENCES buttons(id) ON DELETE SET NULL,
-    status TEXT NOT NULL,
-    message TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-"""
+def _load_local_env() -> None:
+    path = Path(__file__).resolve().parents[1] / ".env"
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+_load_local_env()
+
+
+MONGO_URI = os.environ.get("MONGO_URI", "").strip()
+MONGO_DB = os.environ.get("MONGO_DB", "smart_controller").strip()
+LEGACY_COLLECTION = os.environ.get(
+    "MONGO_LEGACY_COLLECTION", os.environ.get("MONGO_COLLECTION", "esp32")
+).strip()
+
+ENTITY_COLLECTIONS = {
+    "nodes": "nodes",
+    "devices": "devices",
+    "buttons": "signals",
+    "ac_controllers": "ac_controllers",
+    "timers": "timers",
+    "timer_presets": "timer_presets",
+    "schedules": "schedules",
+    "workflows": "workflows",
+    "workflow_steps": "workflow_steps",
+    "workflow_schedules": "workflow_schedules",
+    "workflow_runs": "workflow_runs",
+    "workflow_run_steps": "workflow_run_steps",
+    "events": "events",
+}
+COUNTERS_COLLECTION = "_counters"
+
+_client: MongoClient[dict[str, Any]] | None = None
+_database: Database[dict[str, Any]] | None = None
+
+
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def database() -> Database[dict[str, Any]]:
+    global _client, _database
+    if _database is not None:
+        return _database
+    if not MONGO_URI:
+        raise RuntimeError(
+            "MONGO_URI is required. Set it in the environment or the application config.env file."
+        )
+    _client = MongoClient(
+        MONGO_URI,
+        appname="smart-home-controller",
+        serverSelectionTimeoutMS=8000,
+        connectTimeoutMS=8000,
+        socketTimeoutMS=12000,
+    )
+    _database = _client[MONGO_DB]
+    return _database
+
+
+def collection(entity: str) -> Collection[dict[str, Any]]:
+    try:
+        name = ENTITY_COLLECTIONS[entity]
+    except KeyError as exc:
+        raise ValueError(f"Unknown MongoDB entity: {entity}") from exc
+    return database()[name]
+
+
+def counters_collection() -> Collection[dict[str, Any]]:
+    return database()[COUNTERS_COLLECTION]
 
 
 def init_db() -> None:
-    with connect() as conn:
-        conn.executescript(SCHEMA)
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO timer_presets
-                (button_id, duration_seconds, run_at_utc, active, error, legacy_timer_id, created_at)
-            SELECT
-                button_id,
-                MAX(1, CAST(ROUND((julianday(run_at_utc) - julianday(created_at)) * 86400) AS INTEGER)),
-                CASE WHEN status IN ('pending', 'running') THEN run_at_utc ELSE NULL END,
-                CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END,
-                error,
-                id,
-                created_at
-            FROM timers
-            """
-        )
-        conn.execute(
-            """
-            UPDATE timers
-            SET status = 'cancelled'
-            WHERE status IN ('pending', 'running')
-              AND id IN (
-                  SELECT legacy_timer_id FROM timer_presets WHERE legacy_timer_id IS NOT NULL
-              )
-            """
-        )
-        node_columns = {row["name"] for row in conn.execute("PRAGMA table_info(nodes)")}
-        if "sort_order" not in node_columns:
-            conn.execute("ALTER TABLE nodes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
-            for index, row in enumerate(conn.execute("SELECT id FROM nodes ORDER BY room, name, id")):
-                conn.execute("UPDATE nodes SET sort_order = ? WHERE id = ?", (index, row["id"]))
-        for table in ("buttons", "workflows"):
-            columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-            if "starred" not in columns:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
-                conn.execute(f"UPDATE {table} SET starred = 1")
-        conn.execute(
-            """
-            INSERT INTO ac_controllers (node_id)
-            SELECT nodes.id
-            FROM nodes
-            WHERE lower(trim(nodes.name)) = 'bedroom'
-              AND NOT EXISTS (
-                  SELECT 1 FROM ac_controllers WHERE ac_controllers.node_id = nodes.id
-              )
-            ORDER BY nodes.sort_order, nodes.id
-            LIMIT 1
-            """
+    database()
+    assert _client is not None
+    _client.admin.command("ping")
+
+    for name in sorted(set(ENTITY_COLLECTIONS.values())):
+        coll = database()[name]
+        coll.create_index([("id", ASCENDING)], unique=True, name="id_unique")
+        coll.create_index(
+            [("created_at", DESCENDING), ("id", DESCENDING)],
+            name="created_desc",
         )
 
+    collection("nodes").create_index([("base_url", ASCENDING)], unique=True, name="base_url_unique")
+    collection("devices").create_index([("node_id", ASCENDING), ("name", ASCENDING)], name="node_name")
+    collection("buttons").create_index(
+        [("device_id", ASCENDING), ("signal_type", ASCENDING)], name="device_signal_type"
+    )
+    controller_collection = collection("ac_controllers")
+    if "node_id_unique" in controller_collection.index_information():
+        controller_collection.drop_index("node_id_unique")
+    controller_collection.update_many(
+        {"last_node_id": {"$exists": False}, "node_id": {"$exists": True}},
+        [{"$set": {"last_node_id": "$node_id"}}],
+    )
+    controller_collection.update_many({}, {"$unset": {"node_id": ""}})
+    controller_collection.create_index(
+        [("last_node_id", ASCENDING)], name="last_node_id"
+    )
+    collection("timers").create_index(
+        [("status", ASCENDING), ("run_at_utc", ASCENDING)], name="due"
+    )
+    collection("timer_presets").create_index(
+        [("active", ASCENDING), ("run_at_utc", ASCENDING)], name="due"
+    )
+    for entity in ("schedules", "workflow_schedules"):
+        collection(entity).create_index(
+            [("enabled", ASCENDING), ("time_of_day", ASCENDING)], name="due"
+        )
+    collection("workflow_steps").create_index(
+        [("workflow_id", ASCENDING), ("step_order", ASCENDING)],
+        unique=True,
+        name="workflow_step_order_unique",
+    )
+    collection("workflow_runs").create_index(
+        [("workflow_id", ASCENDING), ("status", ASCENDING)], name="workflow_status"
+    )
+    collection("workflow_run_steps").create_index(
+        [("run_id", ASCENDING), ("step_order", ASCENDING)],
+        unique=True,
+        name="run_step_order_unique",
+    )
+    collection("workflow_run_steps").create_index(
+        [("status", ASCENDING), ("run_after_utc", ASCENDING)], name="due"
+    )
+    collection("events").create_index(
+        [("button_id", ASCENDING), ("status", ASCENDING)], name="button_status"
+    )
 
-def fetch_all(query: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
-    with connect() as conn:
-        rows = conn.execute(query, tuple(params)).fetchall()
-    return [dict(row) for row in rows]
+
+def _clean(document: dict[str, Any] | None) -> dict[str, Any] | None:
+    if document is None:
+        return None
+    result = dict(document)
+    result.pop("_id", None)
+    return result
 
 
-def fetch_one(query: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
-    with connect() as conn:
-        row = conn.execute(query, tuple(params)).fetchone()
-    return dict(row) if row else None
+def find_all(
+    entity: str,
+    filters: dict[str, Any] | None = None,
+    *,
+    sort: Iterable[tuple[str, int]] | None = None,
+    limit: int = 0,
+    skip: int = 0,
+) -> list[dict[str, Any]]:
+    cursor = collection(entity).find(filters or {})
+    if sort:
+        cursor = cursor.sort(list(sort))
+    if skip:
+        cursor = cursor.skip(skip)
+    if limit:
+        cursor = cursor.limit(limit)
+    return [row for document in cursor if (row := _clean(document)) is not None]
 
 
-def execute(query: str, params: Iterable[Any] = ()) -> int:
-    with connect() as conn:
-        cursor = conn.execute(query, tuple(params))
-        return int(cursor.lastrowid)
+def find_one(
+    entity: str,
+    filters: dict[str, Any] | None = None,
+    *,
+    sort: Iterable[tuple[str, int]] | None = None,
+) -> dict[str, Any] | None:
+    row = collection(entity).find_one(filters or {}, sort=list(sort) if sort else None)
+    return _clean(row)
 
 
-def execute_many(query: str, params: Iterable[Iterable[Any]]) -> None:
-    with connect() as conn:
-        conn.executemany(query, [tuple(item) for item in params])
+def count(entity: str, filters: dict[str, Any] | None = None) -> int:
+    return collection(entity).count_documents(filters or {})
+
+
+def insert(entity: str, fields: dict[str, Any], *, entity_id: int | None = None) -> int:
+    coll = collection(entity)
+    counters = counters_collection()
+    if entity_id is None:
+        counter = counters.find_one_and_update(
+            {"_id": entity},
+            {"$inc": {"value": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        if counter is None:
+            raise RuntimeError(f"Could not allocate an ID for {entity}")
+        entity_id = int(counter["value"])
+    else:
+        counters.update_one(
+            {"_id": entity},
+            {"$max": {"value": entity_id}},
+            upsert=True,
+        )
+
+    document = {
+        "_id": entity_id,
+        "id": entity_id,
+        "created_at": utc_stamp(),
+        **fields,
+    }
+    try:
+        coll.insert_one(document)
+    except DuplicateKeyError as exc:
+        raise ValueError(f"Duplicate {entity} record") from exc
+    return entity_id
+
+
+def insert_many(entity: str, rows: Iterable[dict[str, Any]]) -> list[int]:
+    return [insert(entity, row) for row in rows]
+
+
+def update(
+    entity: str,
+    filters: dict[str, Any],
+    fields: dict[str, Any],
+    *,
+    many: bool = False,
+) -> int:
+    coll = collection(entity)
+    operation = coll.update_many if many else coll.update_one
+    result = operation(filters, {"$set": fields})
+    return int(result.modified_count)
+
+
+def delete(entity: str, filters: dict[str, Any], *, many: bool = False) -> int:
+    coll = collection(entity)
+    operation = coll.delete_many if many else coll.delete_one
+    result = operation(filters)
+    return int(result.deleted_count)
+
+
+def distinct(entity: str, field: str, filters: dict[str, Any] | None = None) -> list[Any]:
+    return collection(entity).distinct(field, filters or {})
+
+
+def aggregate(entity: str, pipeline: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return list(collection(entity).aggregate(list(pipeline)))
+
+
+def replace_all(entity: str, rows: Iterable[dict[str, Any]]) -> int:
+    delete(entity, {}, many=True)
+    counters_collection().delete_one({"_id": entity})
+    inserted = 0
+    for row in rows:
+        document = dict(row)
+        entity_id = int(document.pop("id"))
+        insert(entity, document, entity_id=entity_id)
+        inserted += 1
+    return inserted
+
+
+def close() -> None:
+    global _client, _database
+    if _client is not None:
+        _client.close()
+    _client = None
+    _database = None

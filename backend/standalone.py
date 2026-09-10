@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -30,26 +29,32 @@ def application_data_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "smart-home-controller"
 
 
-def bundled_path(*parts: str) -> Path:
-    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    return bundle_root.joinpath(*parts)
+def load_env_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
 
 
-def configure_database() -> Path:
+def configure_mongo() -> Path:
     data_dir = application_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
-    database = Path(os.environ.get("SMART_HOME_DB", data_dir / "smart_home.sqlite3"))
-    database.parent.mkdir(parents=True, exist_ok=True)
-
-    if not database.exists():
-        seed = bundled_path("seed", "smart_home.sqlite3")
-        if not seed.exists() and not getattr(sys, "frozen", False):
-            seed = Path(__file__).resolve().parent / "smart_home.sqlite3"
-        if seed.exists():
-            shutil.copy2(seed, database)
-
-    os.environ["SMART_HOME_DB"] = str(database)
-    return database
+    explicit = os.environ.get("SMART_HOME_CONFIG")
+    config_path = Path(explicit).expanduser() if explicit else data_dir / "config.env"
+    if not getattr(sys, "frozen", False) and not explicit:
+        load_env_file(Path(__file__).resolve().parent / ".env")
+    load_env_file(config_path)
+    if not os.environ.get("MONGO_URI", "").strip():
+        raise RuntimeError(f"MONGO_URI is missing. Add it to {config_path}")
+    os.environ.setdefault("MONGO_DB", "smart_controller")
+    return config_path
 
 
 def controller_is_running(url: str) -> bool:
@@ -114,8 +119,15 @@ def main() -> int:
         show_error(f"Port {port} is already used by another application.")
         return 1
 
-    database = configure_database()
-    print(f"Database: {database}", flush=True)
+    try:
+        config_path = configure_mongo()
+    except Exception as exc:
+        show_error(str(exc))
+        return 1
+    print(
+        f"MongoDB database: {os.environ['MONGO_DB']} (config: {config_path})",
+        flush=True,
+    )
 
     from app.main import app
 

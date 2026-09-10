@@ -2,6 +2,8 @@ let controllerSlug = decodeURIComponent(window.location.pathname.slice(1));
 let controllerId = null;
 let controller = null;
 let controllers = [];
+let nodes = [];
+let selectedNodeId = null;
 let timezone = "Asia/Kuala_Lumpur";
 
 const el = (id) => document.getElementById(id);
@@ -59,24 +61,38 @@ function renderControllerTabs() {
 
 function renderController() {
   if (!controller) return;
-  document.title = `${controller.name} - ${controller.node_name}`;
+  const node = nodes.find((item) => item.id === selectedNodeId) || null;
+  const status = node?.health?.status || "unknown";
+  const canSend = Boolean(node?.enabled) && status === "online";
+  document.title = `${controller.name} - Smart-home controller`;
   el("controllerTitle").textContent = controller.name;
-  el("controllerNodeName").textContent = controller.node_name;
+  el("controllerBrand").textContent = controller.brand;
+  el("controllerNode").innerHTML = nodes.length
+    ? nodes.map((item) => `<option value="${item.id}"${item.id === selectedNodeId ? " selected" : ""}>${escapeHtml(item.name)} - ${escapeHtml(item.health?.status || "unknown")}</option>`).join("")
+    : '<option value="">No nodes configured</option>';
+  el("controllerNodeStatus").className = `node-status-dot node-status-${status}`;
+  el("controllerNodeField").setAttribute("aria-label", node ? `${node.name} ${status}` : "No node selected");
   el("controllerTemperatureDisplay").innerHTML = `${controller.temperature}&deg;`;
   el("controllerTemperatureValue").innerHTML = `${controller.temperature}&deg;C`;
-  el("controllerDisplaySummary").textContent = `Fan ${fanLabel(controller.fan)} · Swing ${controller.swing ? "on" : "off"}`;
+  el("controllerDisplaySummary").textContent = `${controller.power ? "ON" : "OFF"} · Fan ${fanLabel(controller.fan)} · Swing ${controller.swing ? "Auto" : "Fixed"}`;
   el("controllerTemperatureDown").disabled = controller.temperature <= 16;
   el("controllerTemperatureUp").disabled = controller.temperature >= 30;
   el("controllerSwing").checked = controller.swing;
+  el("controllerPowerLabel").textContent = controller.power ? "Turn off" : "Turn on";
   document.querySelectorAll("[data-controller-fan]").forEach((button) => {
     const selected = button.dataset.controllerFan === controller.fan;
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
-  const status = controller.health?.status || "unknown";
-  const statusDot = el("controllerNodeStatus");
-  statusDot.parentElement.className = `eyebrow controller-tab-node node-health-${status}`;
-  statusDot.parentElement.setAttribute("aria-label", `Node ${status}`);
+  [
+    el("controllerTemperatureDown"),
+    el("controllerTemperatureUp"),
+    el("controllerSwing"),
+    el("controllerPower"),
+    ...document.querySelectorAll("[data-controller-fan]"),
+  ].forEach((control) => {
+    control.disabled = !canSend;
+  });
   el("apiStatus").textContent = `${controllers.length} controller${controllers.length === 1 ? "" : "s"}`;
   el("clock").textContent = timezone;
   renderControllerTabs();
@@ -87,7 +103,7 @@ function renderController() {
 
 function setBusy(busy) {
   el("controllerPanel").setAttribute("aria-busy", String(busy));
-  el("controllerPanel").querySelectorAll("button, input").forEach((control) => {
+  el("controllerPanel").querySelectorAll("button, input, select").forEach((control) => {
     control.disabled = busy;
   });
   if (!busy) renderController();
@@ -96,6 +112,7 @@ function setBusy(busy) {
 async function sendController(changes = {}, powerToggle = false) {
   if (!controller) return;
   const command = {
+    node_id: selectedNodeId,
     temperature: controller.temperature,
     fan: controller.fan,
     swing: controller.swing,
@@ -109,6 +126,7 @@ async function sendController(changes = {}, powerToggle = false) {
       body: JSON.stringify(command),
     });
     controller = { ...controller, ...result.controller };
+    selectedNodeId = result.controller.last_node_id;
     renderController();
     showToast(result.message);
   } catch (error) {
@@ -125,6 +143,11 @@ async function loadController() {
     controller = result.controller;
     controllerId = controller.id;
     controllers = result.controllers;
+    nodes = result.nodes;
+    selectedNodeId = controller.last_node_id
+      || nodes.find((node) => node.health?.status === "online" && node.enabled)?.id
+      || nodes[0]?.id
+      || null;
     timezone = result.timezone;
     el("controllerMessage").hidden = true;
     el("controllerPanel").hidden = false;
@@ -156,6 +179,10 @@ el("controllerSwing").addEventListener("change", (event) => {
   sendController({ swing: event.currentTarget.checked });
 });
 el("controllerPower").addEventListener("click", () => sendController({}, true));
+el("controllerNode").addEventListener("change", (event) => {
+  selectedNodeId = Number(event.currentTarget.value) || null;
+  renderController();
+});
 el("renameController").addEventListener("click", openControllerNameDialog);
 el("closeControllerNameDialog").addEventListener("click", () => el("controllerNameDialog").close());
 el("cancelControllerName").addEventListener("click", () => el("controllerNameDialog").close());

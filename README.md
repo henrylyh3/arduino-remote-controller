@@ -11,7 +11,7 @@ phone/browser -> laptop web app -> HTTP over Wi-Fi -> ESP32 room node -> RF/IR -
 ## What is included
 
 - FastAPI backend served from the always-on laptop.
-- SQLite database for nodes, learned signals, timers, workflows, schedules, and event counts.
+- MongoDB Atlas storage for nodes, learned signals, timers, workflows, schedules, and event counts.
 - Browser dashboard for phones/laptops on the same Wi-Fi.
 - ESP32 starter firmware for 433 MHz RF send/capture and raw IR send/capture.
 
@@ -113,13 +113,24 @@ backend/dist/Smart Home Controller.app
 
 The app opens the dashboard in a native window and starts the server on port `8000`. Keep that window open while phones or ESP32 nodes use it. Closing the window or choosing `Quit` stops the server; it does not continue running invisibly in the background. The macOS build runs on Apple Silicon Macs; build again on an Intel Mac for an Intel-compatible app.
 
-The executable stores its working database here:
+The executable reads its MongoDB settings from:
 
 ```text
-~/Library/Application Support/Smart Home Controller/smart_home.sqlite3
+macOS:  ~/Library/Application Support/Smart Home Controller/config.env
+Windows: %LOCALAPPDATA%\Smart Home Controller\config.env
 ```
 
-On first launch, it copies the current `backend/smart_home.sqlite3` into that location. Later builds do not overwrite the working database.
+The file format is:
+
+```dotenv
+MONGO_URI=mongodb+srv://USERNAME:PASSWORD@YOUR_CLUSTER.mongodb.net/
+MONGO_DB=smart_controller
+APP_TIMEZONE=Asia/Kuala_Lumpur
+```
+
+The executable will show an error and stop when `MONGO_URI` is missing or Atlas cannot be reached.
+
+The same configuration is intentionally published at `backend/static/config.env` and is available from the running app at `/static/config.env`. This public copy includes the MongoDB credentials and is also bundled into standalone executable builds.
 
 Build a fresh macOS application after changing the backend or frontend:
 
@@ -131,6 +142,8 @@ cd backend
 Windows executables must be built on Windows. Run `backend\\build_executable.bat`; the result is `backend\\dist\\Smart Home Controller.exe`. Python is required only on the computer performing the build, not on computers running the resulting executable.
 
 ### Development server
+
+Create `backend/.env` from `backend/.env.example` and add the real Atlas URI. The `.env` file is ignored by Git.
 
 ```bash
 cd backend
@@ -158,10 +171,45 @@ Find the laptop LAN IP on macOS:
 ipconfig getifaddr en0
 ```
 
-The SQLite file is created at `backend/smart_home.sqlite3`. Override with:
+MongoDB settings may also be supplied as environment variables:
 
 ```bash
-SMART_HOME_DB=/path/to/controller.sqlite3 uvicorn app.main:app --host 0.0.0.0 --port 8000
+MONGO_URI='mongodb+srv://USERNAME:PASSWORD@YOUR_CLUSTER.mongodb.net/' \
+MONGO_DB=smart_controller \
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+The `smart_controller` database uses separate collections:
+
+| Collection | Content |
+| --- | --- |
+| `nodes` | ESP32 node names, addresses, order, and health metadata |
+| `devices` | Signal ownership links between nodes and saved signals |
+| `signals` | Learned RF and IR payloads |
+| `ac_controllers` | Virtual AC controller state |
+| `timers`, `timer_presets` | One-time and reusable timers |
+| `schedules`, `workflow_schedules` | Recurring schedules |
+| `workflows`, `workflow_steps` | Workflow definitions |
+| `workflow_runs`, `workflow_run_steps` | Active and historical workflow execution |
+| `events` | Event log and signal counters |
+| `_counters` | Internal numeric ID allocation |
+
+The existing SQLite data can be imported once with:
+
+```bash
+cd backend
+source .venv/bin/activate
+python migrate_sqlite_to_mongo.py smart_home.sqlite3
+```
+
+The script preserves record IDs and refuses to overwrite populated MongoDB collections unless `--replace` is supplied. SQLite is not used by the running application after migration.
+
+For an older installation that stored every entity in one MongoDB `esp32` collection, split and verify it once with:
+
+```bash
+cd backend
+source .venv/bin/activate
+python migrate_mongo_collections.py --drop-source
 ```
 
 Default schedule timezone is `Asia/Kuala_Lumpur`. Override with:
@@ -182,6 +230,15 @@ Each air-conditioner controller has a name-based page, such as
 `http://127.0.0.1:8000/nicole`. From another device, replace `127.0.0.1` with the
 host laptop's local IP address. Controller names appear as navigation tabs and can
 be renamed from their controller page. Dashboard controller tiles continue to open the popup.
+
+Air-conditioner controllers are global and store their brand and protocol separately
+from room nodes. Choose the destination node in the controller before sending; each
+controller remembers the last node that successfully received its command.
+Supported protocol values are `daikin64` (Daikin) and `panasonic_ac` (Panasonic
+216-bit full-state). Commands are encoded by the selected controller protocol; adding
+a Panasonic controller does not change existing Daikin controllers. The controller
+remembers its last sent power, temperature, fan, and swing state. Physical remote use
+can still make that remembered state drift from the appliance.
 
 Signals and workflows are both actions. The same timer and schedule forms can target either one; only workflows contain multiple steps.
 The node list under `Configuration` supports renaming, guarded deletion, and desktop drag-and-drop ordering. The drag grip is hidden on mobile. Node order is shared by Configuration and Control signal tabs.
@@ -322,4 +379,4 @@ GET /capture/ir?timeout_ms=10000
 
 ## Network notes
 
-This is local-first software. Run it only on trusted home Wi-Fi. Do not expose the laptop port to the internet.
+Device control traffic remains inside the home network, but MongoDB Atlas persistence requires internet access. If Atlas is unavailable, the app cannot load or save controller data. Add the host network's public IP to the Atlas Network Access list and do not use `0.0.0.0/0` unless you accept public connection attempts. Run the web app only on trusted home Wi-Fi and do not port-forward its HTTP port.

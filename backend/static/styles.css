@@ -605,11 +605,19 @@ label {
   background: #2e9b58;
 }
 
+.node-status-online {
+  background: #2e9b58;
+}
+
 .node-health-offline {
   color: var(--bad);
 }
 
 .node-health-offline .node-status-dot {
+  background: var(--bad);
+}
+
+.node-status-offline {
   background: var(--bad);
 }
 
@@ -1137,6 +1145,24 @@ fieldset input {
 .ac-controller-header .icon-button {
   font-size: 24px;
   line-height: 1;
+}
+
+.ac-node-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.ac-node-field > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ac-node-field select {
+  width: 100%;
 }
 
 .ac-display {

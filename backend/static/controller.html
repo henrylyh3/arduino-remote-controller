@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Aircond controller</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260909-05" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260910-03" />
   </head>
   <body>
     <header class="topbar">
@@ -33,19 +33,21 @@
           <div id="controllerPanel" class="controller-tab-content ac-controller-shell" aria-labelledby="controllerTitle" hidden>
             <header class="ac-controller-header">
               <div>
-                <p class="eyebrow controller-tab-node">
-                  <span id="controllerNodeStatus" class="node-status-dot" aria-hidden="true"></span>
-                  <span id="controllerNodeName">Node</span>
-                </p>
+                <p id="controllerBrand" class="eyebrow">Brand</p>
                 <h2 id="controllerTitle">Aircond controller</h2>
               </div>
               <button id="renameController" class="secondary" type="button">Rename</button>
             </header>
 
+            <label id="controllerNodeField" class="ac-node-field" for="controllerNode">
+              <span><span id="controllerNodeStatus" class="node-status-dot node-status-unknown" aria-hidden="true"></span>Send to node</span>
+              <select id="controllerNode"></select>
+            </label>
+
             <div class="ac-display" aria-live="polite">
               <span>COOL</span>
               <output id="controllerTemperatureDisplay">27&deg;</output>
-              <div id="controllerDisplaySummary">Fan 1 &middot; Swing off</div>
+              <div id="controllerDisplaySummary">OFF &middot; Fan Auto &middot; Swing Auto</div>
             </div>
 
             <section class="ac-control-section" aria-labelledby="controllerTemperatureLabel">
@@ -69,15 +71,15 @@
 
             <label class="ac-switch-row" for="controllerSwing">
               <span>
-                <strong>Swing</strong>
-                <small>Vertical airflow</small>
+                <strong>Swing auto</strong>
+                <small>Off uses fixed centre position</small>
               </span>
               <input id="controllerSwing" type="checkbox" role="switch" />
             </label>
 
             <button id="controllerPower" class="ac-power-button" type="button">
               <span class="power-symbol" aria-hidden="true">&#9211;</span>
-              Power toggle
+              <span id="controllerPowerLabel">Turn on</span>
             </button>
 
             <p id="controllerLastSent" class="ac-last-sent">No command sent yet</p>
@@ -104,6 +106,6 @@
     </dialog>
 
     <div id="controllerToast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/controller.js?v=20260909-03" type="module"></script>
+    <script src="/static/controller.js?v=20260910-03" type="module"></script>
   </body>
 </html>

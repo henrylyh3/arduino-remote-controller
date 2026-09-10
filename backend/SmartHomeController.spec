@@ -9,7 +9,6 @@ root = Path(SPECPATH)
 window_backend = "webview.platforms.cocoa" if sys.platform == "darwin" else "webview.platforms.winforms"
 datas = [
     (str(root / "static"), "static"),
-    (str(root / "smart_home.sqlite3"), "seed"),
     *collect_data_files("tzdata"),
 ]
 
