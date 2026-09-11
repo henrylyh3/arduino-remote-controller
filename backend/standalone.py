@@ -168,6 +168,18 @@ def main() -> int:
         show_error(f"Port {port} is already used by another application.")
         return 1
 
+    # Windowed executables have no console streams; keep startup diagnostics in a log.
+    if sys.stdout is None or sys.stderr is None:
+        data_dir = application_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        log_stream = (data_dir / "controller.log").open(
+            "a", encoding="utf-8", buffering=1
+        )
+        if sys.stdout is None:
+            sys.stdout = log_stream
+        if sys.stderr is None:
+            sys.stderr = log_stream
+
     while True:
         try:
             config_path = configure_mongo()

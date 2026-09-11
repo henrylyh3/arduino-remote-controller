@@ -6,6 +6,8 @@ from PyInstaller.utils.hooks import collect_data_files
 
 APP_NAME = "Smart Home Controller"
 root = Path(SPECPATH)
+windows_icon = root / "assets" / "app-icon.ico"
+macos_icon = root / "assets" / "app-icon.icns"
 window_backend = "webview.platforms.cocoa" if sys.platform == "darwin" else "webview.platforms.winforms"
 datas = [
     (str(root / "static"), "static"),
@@ -44,6 +46,7 @@ if sys.platform == "darwin":
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
+        icon=str(macos_icon),
     )
     collected = COLLECT(
         exe,
@@ -56,7 +59,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         collected,
         name=f"{APP_NAME}.app",
-        icon=None,
+        icon=str(macos_icon),
         bundle_identifier="local.smart-home.controller",
         info_plist={
             "CFBundleDisplayName": APP_NAME,
@@ -77,4 +80,5 @@ else:
         upx=True,
         console=False,
         disable_windowed_traceback=False,
+        icon=str(windows_icon),
     )

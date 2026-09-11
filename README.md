@@ -105,6 +105,16 @@ Important: keep the SYN115 transmitter and SYN480R receiver powered from ESP32 3
 
 No Python installation or terminal command is needed to run a built executable.
 
+On Windows 10/11 (64-bit), double-click:
+
+```text
+backend/dist/Smart Home Controller.exe
+```
+
+Copy that single file to another folder or PC; there is no app installer. Python, application dependencies, and frontend assets are bundled. The native window uses the PC's existing Microsoft Edge WebView2 Runtime. No installation is needed on a PC that already has WebView2; other PCs need that runtime first.
+
+Windows saves its configuration and startup log in `%LOCALAPPDATA%\Smart Home Controller`. Close the app window to stop the server.
+
 On macOS, double-click:
 
 ```text
