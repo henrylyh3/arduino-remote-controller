@@ -850,8 +850,14 @@ async def node_health_loop() -> None:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    db.init_db()
+async def lifespan(application: FastAPI):
+    application.state.startup_error = None
+    try:
+        db.init_db()
+    except Exception as exc:
+        application.state.startup_error = exc
+        db.close()
+        raise
     tasks = [asyncio.create_task(scheduler_loop()), asyncio.create_task(node_health_loop())]
     try:
         yield

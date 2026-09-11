@@ -91,12 +91,61 @@ def show_error(message: str) -> None:
         print(message, file=sys.stderr)
 
 
-def wait_until_running(url: str) -> bool:
+def ask_retry(message: str) -> bool:
+    if sys.platform == "darwin":
+        escaped = message.replace("\\", "\\\\").replace('"', '\\"')
+        result = subprocess.run(
+            [
+                "osascript",
+                "-e",
+                (
+                    f'display dialog "{escaped}" with title "{APP_NAME}" '
+                    'buttons {"Quit", "Retry"} default button "Retry" '
+                    'cancel button "Quit" with icon stop'
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.returncode == 0 and "Retry" in result.stdout
+    if os.name == "nt":
+        import ctypes
+
+        return ctypes.windll.user32.MessageBoxW(0, message, APP_NAME, 0x15) == 4
+
+    print(message, file=sys.stderr)
+    return input("Retry? [y/N]: ").strip().lower() in {"y", "yes"}
+
+
+def wait_until_running(url: str, server_thread: threading.Thread | None = None) -> bool:
     for _ in range(120):
         if controller_is_running(url):
             return True
+        if server_thread is not None and not server_thread.is_alive():
+            return False
         time.sleep(0.25)
     return False
+
+
+def format_startup_error(error: Exception | None) -> str:
+    if error is None:
+        return "The local server did not start. Check the application logs for details."
+
+    detail = str(error).strip() or type(error).__name__
+    mongo_uri = os.environ.get("MONGO_URI", "").strip()
+    if mongo_uri:
+        detail = detail.replace(mongo_uri, "<redacted MongoDB URI>")
+    detail = detail[:700]
+
+    if type(error).__name__ == "ServerSelectionTimeoutError":
+        detail = detail.split(" (configured timeouts", 1)[0]
+        return (
+            "Cannot connect to MongoDB. Check the internet connection and ensure "
+            "MongoDB Atlas Network Access allows this computer's current public IP.\n\n"
+            f"{type(error).__name__}: {detail}"
+        )
+    return f"Application startup failed.\n\n{type(error).__name__}: {detail}"
 
 
 def stop_server(server: uvicorn.Server, server_thread: threading.Thread) -> None:
@@ -119,11 +168,13 @@ def main() -> int:
         show_error(f"Port {port} is already used by another application.")
         return 1
 
-    try:
-        config_path = configure_mongo()
-    except Exception as exc:
-        show_error(str(exc))
-        return 1
+    while True:
+        try:
+            config_path = configure_mongo()
+            break
+        except Exception as exc:
+            if not ask_retry(format_startup_error(exc)):
+                return 1
     print(
         f"MongoDB database: {os.environ['MONGO_DB']} (config: {config_path})",
         flush=True,
@@ -131,22 +182,34 @@ def main() -> int:
 
     from app.main import app
 
-    config = uvicorn.Config(app, host=host, port=port, loop="asyncio", http="h11", log_level="info")
-    server = uvicorn.Server(config)
-
     if os.environ.get("SMART_HOME_WINDOW", "1") == "0":
+        config = uvicorn.Config(
+            app, host=host, port=port, loop="asyncio", http="h11", log_level="info"
+        )
+        server = uvicorn.Server(config)
         try:
             server.run()
         except KeyboardInterrupt:
             pass
         return 0
 
-    server_thread = threading.Thread(target=server.run, daemon=True, name="smart-home-server")
-    server_thread.start()
-    if not wait_until_running(browser_url):
+    while True:
+        app.state.startup_error = None
+        config = uvicorn.Config(
+            app, host=host, port=port, loop="asyncio", http="h11", log_level="info"
+        )
+        server = uvicorn.Server(config)
+        server_thread = threading.Thread(
+            target=server.run, daemon=True, name="smart-home-server"
+        )
+        server_thread.start()
+        if wait_until_running(browser_url, server_thread):
+            break
+
         stop_server(server, server_thread)
-        show_error("The local server did not start.")
-        return 1
+        startup_error = getattr(app.state, "startup_error", None)
+        if not ask_retry(format_startup_error(startup_error)):
+            return 1
 
     import webview
 
