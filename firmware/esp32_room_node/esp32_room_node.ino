@@ -2,6 +2,7 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <esp32-hal-rmt.h>
 #include <vector>
 
 #include <RCSwitch.h>
@@ -16,6 +17,11 @@ const uint8_t IR_TX_PIN = 4;
 const uint8_t IR_RX_PIN = 14;
 const unsigned long WIFI_RECONNECT_INTERVAL_MS = 5000;
 const uint8_t CONFIG_RESET_PIN = 0;
+const uint32_t RF_RMT_FREQUENCY_HZ = 1000000;
+const uint16_t RF_RMT_IDLE_US = 20000;
+const uint8_t RF_RMT_FILTER_US = 1;
+const size_t RF_RMT_CAPTURE_SYMBOLS =
+    RMT_MEM_NUM_BLOCKS_4 * RMT_SYMBOLS_PER_CHANNEL_BLOCK;
 
 const uint16_t IR_CAPTURE_BUFFER = 1024;
 const uint8_t IR_TIMEOUT_MS = 50;
@@ -83,6 +89,26 @@ bool parseRawCsv(const String &csv, std::vector<uint16_t> &out) {
     start = comma + 1;
   }
   return out.size() > 0;
+}
+
+bool parseSignedRawCsv(const String &csv, std::vector<int32_t> &out) {
+  int start = 0;
+  while (start < csv.length()) {
+    int comma = csv.indexOf(',', start);
+    if (comma < 0) comma = csv.length();
+    String part = csv.substring(start, comma);
+    part.trim();
+    if (part.length() > 0) {
+      char *end = nullptr;
+      long value = strtol(part.c_str(), &end, 10);
+      if (*end != '\0' || value == 0 || value < -32767 || value > 32767) {
+        return false;
+      }
+      out.push_back(static_cast<int32_t>(value));
+    }
+    start = comma + 1;
+  }
+  return !out.empty();
 }
 
 void handleHealth() {
@@ -204,6 +230,59 @@ void handleSendRFRaw() {
   response += String(raw.size());
   response += ",\"repeat\":";
   response += String(repeat);
+  response += "}";
+  sendJson(200, response);
+}
+
+void handleSendRFBurst() {
+  String body = server.arg("plain");
+  if (body.length() == 0) {
+    sendError(400, "missing burst body");
+    return;
+  }
+
+  std::vector<int32_t> pulses;
+  if (!parseSignedRawCsv(body, pulses) || pulses.size() < 4 ||
+      pulses.size() > RF_RMT_CAPTURE_SYMBOLS * 2) {
+    sendError(400, "burst must contain 4-512 signed microsecond durations");
+    return;
+  }
+
+  std::vector<rmt_data_t> symbols((pulses.size() + 1) / 2);
+  for (size_t i = 0; i < symbols.size(); i++) {
+    size_t first = i * 2;
+    symbols[i].level0 = pulses[first] > 0 ? HIGH : LOW;
+    symbols[i].duration0 = abs(pulses[first]);
+    if (first + 1 < pulses.size()) {
+      symbols[i].level1 = pulses[first + 1] > 0 ? HIGH : LOW;
+      symbols[i].duration1 = abs(pulses[first + 1]);
+    } else {
+      symbols[i].level1 = LOW;
+      symbols[i].duration1 = 0;
+    }
+  }
+
+  rfRx.disableReceive();
+  if (!rmtInit(RF_TX_PIN, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1,
+               RF_RMT_FREQUENCY_HZ)) {
+    rfRx.enableReceive(digitalPinToInterrupt(RF_RX_PIN));
+    sendError(500, "could not initialize RF burst transmitter");
+    return;
+  }
+  rmtSetEOT(RF_TX_PIN, LOW);
+  bool sent = rmtWrite(RF_TX_PIN, symbols.data(), symbols.size(), 5000);
+  rmtDeinit(RF_TX_PIN);
+  rfTx.enableTransmit(RF_TX_PIN);
+  digitalWrite(RF_TX_PIN, LOW);
+  rfRx.enableReceive(digitalPinToInterrupt(RF_RX_PIN));
+
+  if (!sent) {
+    sendError(500, "RF burst transmission failed");
+    return;
+  }
+
+  String response = "{\"ok\":true,\"signal_type\":\"rf_burst\",\"pulse_count\":";
+  response += String(pulses.size());
   response += "}";
   sendJson(200, response);
 }
@@ -338,6 +417,137 @@ void handleCaptureRFRaw() {
   sendError(408, "rf raw capture timeout");
 }
 
+bool appendCompleteRFFrames(const std::vector<int32_t> &captured,
+                            unsigned int bits,
+                            std::vector<int32_t> &frames,
+                            unsigned int &frameCount) {
+  const size_t framePulseCount = bits * 2 + 2;
+  if (framePulseCount < 4 || captured.size() < framePulseCount) return false;
+
+  for (size_t gap = framePulseCount - 1; gap < captured.size(); gap++) {
+    long gapDuration = abs(captured[gap]);
+    if (gapDuration < 4000 || gapDuration > 15000) continue;
+
+    size_t start = gap - (framePulseCount - 1);
+    bool valid = true;
+    for (size_t i = start; i < gap; i++) {
+      long duration = abs(captured[i]);
+      if (duration < 250 || duration > 1800) {
+        valid = false;
+        break;
+      }
+      if (i > start && ((captured[i] > 0) == (captured[i - 1] > 0))) {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid || ((captured[gap] > 0) == (captured[gap - 1] > 0))) continue;
+
+    frames.insert(frames.end(), captured.begin() + start, captured.begin() + gap + 1);
+    frameCount++;
+  }
+  return frameCount > 0;
+}
+
+void handleCaptureRFBurst() {
+  unsigned long timeoutMs = argUL("timeout_ms", 20000);
+  unsigned long started = millis();
+  unsigned long triggerCode = 0;
+  unsigned int triggerBits = 0;
+  unsigned int triggerProtocol = 0;
+  rfRx.resetAvailable();
+
+  while (millis() - started < timeoutMs) {
+    if (!server.client().connected()) {
+      rfRx.resetAvailable();
+      return;
+    }
+    if (rfRx.available()) {
+      triggerCode = rfRx.getReceivedValue();
+      triggerBits = rfRx.getReceivedBitlength();
+      triggerProtocol = rfRx.getReceivedProtocol();
+      rfRx.resetAvailable();
+      break;
+    }
+    delay(2);
+  }
+
+  if (triggerCode == 0 || triggerBits == 0) {
+    sendError(408, "rf burst trigger timeout");
+    return;
+  }
+
+  rfRx.disableReceive();
+
+  if (!rmtInit(RF_RX_PIN, RMT_RX_MODE, RMT_MEM_NUM_BLOCKS_4,
+               RF_RMT_FREQUENCY_HZ)) {
+    rfRx.enableReceive(digitalPinToInterrupt(RF_RX_PIN));
+    sendError(500, "could not initialize RF burst receiver");
+    return;
+  }
+  rmtSetRxMinThreshold(RF_RX_PIN, RF_RMT_FILTER_US);
+  rmtSetRxMaxThreshold(RF_RX_PIN, RF_RMT_IDLE_US);
+
+  static rmt_data_t captured[RF_RMT_CAPTURE_SYMBOLS];
+  std::vector<int32_t> frames;
+  unsigned int frameCount = 0;
+  bool capturedAny = false;
+
+  while (millis() - started < timeoutMs && frameCount == 0) {
+    size_t symbolCount = RF_RMT_CAPTURE_SYMBOLS;
+    uint32_t remainingMs = timeoutMs - (millis() - started);
+    bool readCompleted = rmtRead(RF_RX_PIN, captured, &symbolCount, remainingMs);
+    if (!readCompleted && !rmtReceiveCompleted(RF_RX_PIN)) break;
+    if (symbolCount == 0) continue;
+
+    capturedAny = true;
+    std::vector<int32_t> allPulses;
+    allPulses.reserve(symbolCount * 2);
+    for (size_t i = 0; i < symbolCount; i++) {
+      if (captured[i].duration0 > 0) {
+        int32_t duration = captured[i].duration0;
+        allPulses.push_back(captured[i].level0 == LOW ? -duration : duration);
+      }
+      if (captured[i].duration1 > 0) {
+        int32_t duration = captured[i].duration1;
+        allPulses.push_back(captured[i].level1 == LOW ? -duration : duration);
+      }
+    }
+    appendCompleteRFFrames(allPulses, triggerBits, frames, frameCount);
+  }
+
+  rmtDeinit(RF_RX_PIN);
+  rfRx.enableReceive(digitalPinToInterrupt(RF_RX_PIN));
+
+  if (!capturedAny) {
+    sendError(408, "rf burst follow-up timeout; release and press the same button again");
+    return;
+  }
+
+  if (frameCount == 0) {
+    sendError(422, "RF detected but no complete frame captured; press, release, then press the same button again");
+    return;
+  }
+
+  String body = "{\"signal_type\":\"rf_burst\",\"tick_us\":1,\"trigger_code\":";
+  body += String(triggerCode);
+  body += ",\"bits\":";
+  body += String(triggerBits);
+  body += ",\"protocol\":";
+  body += String(triggerProtocol);
+  body += ",\"frames\":";
+  body += String(frameCount);
+  body += ",\"pulses\":[";
+  for (size_t i = 0; i < frames.size(); i++) {
+    if (i > 0) body += ',';
+    body += String(frames[i]);
+  }
+  body += "],\"pulse_count\":";
+  body += String(frames.size());
+  body += "}";
+  sendJson(200, body);
+}
+
 void handleCaptureIR() {
   unsigned long timeoutMs = argUL("timeout_ms", 10000);
   unsigned long started = millis();
@@ -412,9 +622,11 @@ void registerApiRoutes() {
   server.on("/health", HTTP_GET, handleHealth);
   server.on("/send/rf", HTTP_GET, handleSendRF);
   server.on("/send/rf/raw", HTTP_POST, handleSendRFRaw);
+  server.on("/send/rf/burst", HTTP_POST, handleSendRFBurst);
   server.on("/send/ir/raw", HTTP_POST, handleSendIRRaw);
   server.on("/capture/rf", HTTP_GET, handleCaptureRF);
   server.on("/capture/rf/raw", HTTP_GET, handleCaptureRFRaw);
+  server.on("/capture/rf/burst", HTTP_GET, handleCaptureRFBurst);
   server.on("/capture/ir", HTTP_GET, handleCaptureIR);
   server.onNotFound(handleNotFound);
 }
