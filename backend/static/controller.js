@@ -5,6 +5,9 @@ let controllers = [];
 let nodes = [];
 let selectedNodeId = null;
 let timezone = "Asia/Kuala_Lumpur";
+const controllerSendDelayMs = 1200;
+let pendingControllerChanges = {};
+let controllerSendTimer = null;
 
 const el = (id) => document.getElementById(id);
 
@@ -51,6 +54,63 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function temperatureOption(value) {
+  const option = document.createElement("button");
+  option.className = "roller-option";
+  option.type = "button";
+  option.role = "option";
+  option.dataset.value = String(value);
+  option.textContent = `${value}°C`;
+  return option;
+}
+
+function selectTemperature(value, notify = false) {
+  const roller = el("controllerTemperatureRoller");
+  const options = [...roller.querySelectorAll(".roller-option")];
+  const option = options.find((item) => Number(item.dataset.value) === Number(value));
+  if (!option) return;
+  const selectedIndex = options.indexOf(option);
+  options.forEach((item, index) => {
+    const selected = index === selectedIndex;
+    item.classList.toggle("is-selected", selected);
+    item.setAttribute("aria-selected", String(selected));
+  });
+  el("controllerTemperatureMobile").value = option.dataset.value;
+  requestAnimationFrame(() => {
+    roller.scrollTo({ top: selectedIndex * (option.offsetHeight || 42), behavior: "auto" });
+  });
+  if (notify) el("controllerTemperatureMobile").dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function setupTemperatureRoller() {
+  const roller = el("controllerTemperatureRoller");
+  for (let value = 16; value <= 30; value += 1) roller.appendChild(temperatureOption(value));
+  roller.addEventListener("click", (event) => {
+    const option = event.target.closest(".roller-option");
+    if (option) selectTemperature(option.dataset.value, true);
+  });
+  roller.addEventListener("scroll", () => {
+    clearTimeout(roller.scrollTimer);
+    roller.scrollTimer = setTimeout(() => {
+      const options = [...roller.querySelectorAll(".roller-option")];
+      const rowHeight = options[0]?.offsetHeight || 42;
+      const index = Math.max(0, Math.min(options.length - 1, Math.round(roller.scrollTop / rowHeight)));
+      const changed = Number(el("controllerTemperatureMobile").value) !== Number(options[index].dataset.value);
+      selectTemperature(options[index].dataset.value, true);
+      if (changed) window.smartHomeFeedback?.();
+    }, 80);
+  }, { passive: true });
+  roller.addEventListener("keydown", (event) => {
+    if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const options = [...roller.querySelectorAll(".roller-option")];
+    const current = options.findIndex((option) => option.classList.contains("is-selected"));
+    const offset = event.key === "ArrowUp" ? -1 : 1;
+    const next = Math.max(0, Math.min(options.length - 1, current + offset));
+    selectTemperature(options[next].dataset.value, true);
+  });
+}
+
 function renderControllerTabs() {
   el("controllerTabs").innerHTML = controllers
     .map((item) => `
@@ -74,6 +134,7 @@ function renderController() {
   el("controllerNodeField").setAttribute("aria-label", node ? `${node.name} ${status}` : "No node selected");
   el("controllerTemperatureDisplay").innerHTML = `${controller.temperature}&deg;`;
   el("controllerTemperatureValue").innerHTML = `${controller.temperature}&deg;C`;
+  selectTemperature(controller.temperature);
   el("controllerDisplaySummary").textContent = `${controller.power ? "ON" : "OFF"} · Fan ${fanLabel(controller.fan)} · Swing ${controller.swing ? "Auto" : "Fixed"}`;
   el("controllerTemperatureDown").disabled = controller.temperature <= 16;
   el("controllerTemperatureUp").disabled = controller.temperature >= 30;
@@ -130,11 +191,28 @@ async function sendController(changes = {}, powerToggle = false) {
     renderController();
     showToast(result.message);
   } catch (error) {
-    renderController();
+    await loadController();
     showToast(error.message, true);
   } finally {
     setBusy(false);
   }
+}
+
+function queueController(changes) {
+  if (!controller) return;
+  Object.assign(controller, changes);
+  Object.assign(pendingControllerChanges, changes);
+  renderController();
+  clearTimeout(controllerSendTimer);
+  controllerSendTimer = setTimeout(() => flushController(), controllerSendDelayMs);
+}
+
+function flushController(powerToggle = false) {
+  clearTimeout(controllerSendTimer);
+  controllerSendTimer = null;
+  const changes = pendingControllerChanges;
+  pendingControllerChanges = {};
+  return sendController(changes, powerToggle);
 }
 
 async function loadController() {
@@ -167,18 +245,22 @@ function openControllerNameDialog() {
 }
 
 el("controllerTemperatureDown").addEventListener("click", () => {
-  sendController({ temperature: Math.max(16, controller.temperature - 1) });
+  queueController({ temperature: Math.max(16, controller.temperature - 1) });
 });
 el("controllerTemperatureUp").addEventListener("click", () => {
-  sendController({ temperature: Math.min(30, controller.temperature + 1) });
+  queueController({ temperature: Math.min(30, controller.temperature + 1) });
+});
+el("controllerTemperatureMobile").addEventListener("change", (event) => {
+  const temperature = Number(event.currentTarget.value);
+  if (controller && temperature !== controller.temperature) queueController({ temperature });
 });
 document.querySelectorAll("[data-controller-fan]").forEach((button) => {
-  button.addEventListener("click", () => sendController({ fan: button.dataset.controllerFan }));
+  button.addEventListener("click", () => queueController({ fan: button.dataset.controllerFan }));
 });
 el("controllerSwing").addEventListener("change", (event) => {
-  sendController({ swing: event.currentTarget.checked });
+  queueController({ swing: event.currentTarget.checked });
 });
-el("controllerPower").addEventListener("click", () => sendController({}, true));
+el("controllerPower").addEventListener("click", () => flushController(true));
 el("controllerNode").addEventListener("change", (event) => {
   selectedNodeId = Number(event.currentTarget.value) || null;
   renderController();
@@ -214,4 +296,5 @@ el("controllerNameForm").addEventListener("submit", async (event) => {
   }
 });
 
+setupTemperatureRoller();
 loadController();

@@ -1229,6 +1229,10 @@ fieldset input {
   font-variant-numeric: tabular-nums;
 }
 
+.temperature-roller-mobile {
+  display: none;
+}
+
 .ac-segmented {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1617,6 +1621,14 @@ fieldset input {
 
   .ac-display output {
     font-size: 50px;
+  }
+
+  .temperature-control {
+    display: none;
+  }
+
+  .temperature-roller-mobile {
+    display: grid;
   }
 
   .timer-delay-desktop {

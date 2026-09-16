@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Aircond controller</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260910-03" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260916-01" />
   </head>
   <body>
     <header class="topbar">
@@ -57,6 +57,10 @@
                 <strong id="controllerTemperatureValue">27&deg;C</strong>
                 <button id="controllerTemperatureUp" class="secondary" type="button" aria-label="Increase temperature">+</button>
               </div>
+              <div class="temperature-roller-mobile roller-field">
+                <input id="controllerTemperatureMobile" type="hidden" value="27" />
+                <div class="roller-frame"><div id="controllerTemperatureRoller" class="roller" role="listbox" tabindex="0" aria-label="Temperature"></div></div>
+              </div>
             </section>
 
             <section class="ac-control-section" aria-labelledby="controllerFanLabel">
@@ -106,6 +110,7 @@
     </dialog>
 
     <div id="controllerToast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/static/controller.js?v=20260910-03" type="module"></script>
+    <script src="/static/feedback.js?v=20260916-01"></script>
+    <script src="/static/controller.js?v=20260916-01" type="module"></script>
   </body>
 </html>

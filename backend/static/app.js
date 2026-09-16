@@ -31,6 +31,9 @@ let workflowStepKey = 0;
 let eventPage = 1;
 let eventTotalPages = 1;
 const eventPageSize = 10;
+const controllerSendDelayMs = 1200;
+let pendingAcControllerChanges = {};
+let acControllerSendTimer = null;
 
 const el = (id) => document.getElementById(id);
 
@@ -374,6 +377,9 @@ function renderAcController() {
   const canSend = Boolean(node?.enabled) && status === "online";
   el("acTemperatureDisplay").innerHTML = `${controller.temperature}&deg;`;
   el("acTemperatureValue").innerHTML = `${controller.temperature}&deg;C`;
+  if (el("acTemperatureRoller").children.length) {
+    selectRollerValue("acTemperatureRoller", controller.temperature);
+  }
   el("acControllerMeta").textContent = controller.brand;
   el("acNode").innerHTML = acControllerNodeOptions();
   el("acNodeStatus").className = `node-status-dot node-status-${status}`;
@@ -397,6 +403,8 @@ function renderAcController() {
 }
 
 function openAcController(controllerId) {
+  clearTimeout(acControllerSendTimer);
+  pendingAcControllerChanges = {};
   activeAcControllerId = controllerId;
   const controller = activeAcController();
   activeAcControllerNodeId = controller?.last_node_id
@@ -440,11 +448,30 @@ async function sendAcController(changes = {}, powerToggle = false) {
     renderActions();
     showToast(result.message);
   } catch (error) {
+    await loadState();
     renderAcController();
     showToast(error.message, true);
   } finally {
     setAcControllerBusy(false);
   }
+}
+
+function queueAcController(changes) {
+  const controller = activeAcController();
+  if (!controller) return;
+  Object.assign(controller, changes);
+  Object.assign(pendingAcControllerChanges, changes);
+  renderAcController();
+  clearTimeout(acControllerSendTimer);
+  acControllerSendTimer = setTimeout(() => flushAcController(), controllerSendDelayMs);
+}
+
+function flushAcController(powerToggle = false) {
+  clearTimeout(acControllerSendTimer);
+  acControllerSendTimer = null;
+  const changes = pendingAcControllerChanges;
+  pendingAcControllerChanges = {};
+  return sendAcController(changes, powerToggle);
 }
 
 function daysLabel(days) {
@@ -531,7 +558,9 @@ function setupRoller(rollerId, inputId, values, format = String) {
       const options = [...roller.querySelectorAll(".roller-option")];
       const rowHeight = options[0]?.offsetHeight || 42;
       const index = Math.max(0, Math.min(options.length - 1, Math.round(roller.scrollTop / rowHeight)));
+      const changed = Number(el(inputId).value) !== Number(options[index].dataset.value);
       selectRollerValue(rollerId, options[index].dataset.value, true);
+      if (changed) window.smartHomeFeedback?.();
     }, 80);
   }, { passive: true });
   roller.addEventListener("keydown", (event) => {
@@ -553,6 +582,7 @@ function setupTimerDurationPicker() {
   setupRoller("scheduleHourRoller", "scheduleHour", Array.from({ length: 24 }, (_, value) => value), padded);
   setupRoller("scheduleMinuteRoller", "scheduleMinute", Array.from({ length: 60 }, (_, value) => value), padded);
   setupRoller("captureTimeoutRoller", "captureTimeoutMobile", Array.from({ length: 30 }, (_, index) => index + 1));
+  setupRoller("acTemperatureRoller", "acTemperatureMobile", Array.from({ length: 15 }, (_, index) => index + 16), (value) => `${value}°C`);
   el("scheduleHour").addEventListener("change", syncScheduleTimeFromRollers);
   el("scheduleMinute").addEventListener("change", syncScheduleTimeFromRollers);
   el("scheduleTime").addEventListener("change", () => setScheduleTimeFields(el("scheduleTime").value));
@@ -1301,6 +1331,7 @@ el("acControllerDialog").addEventListener("click", (event) => {
   if (event.target === event.currentTarget) event.currentTarget.close();
 });
 el("acControllerDialog").addEventListener("close", () => {
+  if (Object.keys(pendingAcControllerChanges).length) flushAcController();
   activeAcControllerId = null;
   activeAcControllerNodeId = null;
 });
@@ -1310,19 +1341,24 @@ el("acNode").addEventListener("change", (event) => {
 });
 el("decreaseAcTemperature").addEventListener("click", () => {
   const controller = activeAcController();
-  if (controller) sendAcController({ temperature: Math.max(16, controller.temperature - 1) });
+  if (controller) queueAcController({ temperature: Math.max(16, controller.temperature - 1) });
 });
 el("increaseAcTemperature").addEventListener("click", () => {
   const controller = activeAcController();
-  if (controller) sendAcController({ temperature: Math.min(30, controller.temperature + 1) });
+  if (controller) queueAcController({ temperature: Math.min(30, controller.temperature + 1) });
+});
+el("acTemperatureMobile").addEventListener("change", (event) => {
+  const temperature = Number(event.currentTarget.value);
+  const controller = activeAcController();
+  if (controller && temperature !== controller.temperature) queueAcController({ temperature });
 });
 document.querySelectorAll("[data-ac-fan]").forEach((button) => {
-  button.addEventListener("click", () => sendAcController({ fan: button.dataset.acFan }));
+  button.addEventListener("click", () => queueAcController({ fan: button.dataset.acFan }));
 });
 el("acSwing").addEventListener("change", (event) => {
-  sendAcController({ swing: event.currentTarget.checked });
+  queueAcController({ swing: event.currentTarget.checked });
 });
-el("acPower").addEventListener("click", () => sendAcController({}, true));
+el("acPower").addEventListener("click", () => flushAcController(true));
 
 el("addTimer").addEventListener("click", () => openTimerDialog());
 el("closeTimerDialog").addEventListener("click", () => el("timerDialog").close());
