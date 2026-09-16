@@ -78,11 +78,14 @@
                 <strong>Swing auto</strong>
                 <small>Off uses fixed centre position</small>
               </span>
-              <input id="controllerSwing" type="checkbox" role="switch" />
+              <input id="controllerSwing" class="switch-input" type="checkbox" role="switch" />
+              <span class="switch-track" aria-hidden="true"></span>
             </label>
 
             <button id="controllerPower" class="ac-power-button" type="button">
-              <span class="power-symbol" aria-hidden="true">&#9211;</span>
+              <svg class="power-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 2v10M18.36 5.64a9 9 0 1 1-12.72 0" />
+              </svg>
               <span id="controllerPowerLabel">Turn on</span>
             </button>
 

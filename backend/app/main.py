@@ -62,7 +62,7 @@ class LearnSignalIn(BaseModel):
     node_id: int
     name: str = Field(min_length=1, max_length=80)
     signal_type: Literal["rf", "ir"]
-    timeout_ms: int = Field(default=8000, ge=1000, le=30000)
+    timeout_ms: int = Field(default=15000, ge=1000, le=30000)
 
 
 class CapturedSignalIn(BaseModel):
@@ -1310,7 +1310,7 @@ async def cancel_capture(node_id: int) -> dict[str, Any]:
 async def capture_signal(
     node_id: int,
     signal_type: Literal["rf", "ir"],
-    timeout_ms: int = Query(default=8000, ge=1000, le=30000),
+    timeout_ms: int = Query(default=15000, ge=1000, le=30000),
 ) -> dict[str, Any]:
     normalized = await capture_with_cancellation(node_id, signal_type, timeout_ms)
     duplicate = find_duplicate_signal(node_id, signal_type, normalized)

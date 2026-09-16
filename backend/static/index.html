@@ -91,12 +91,12 @@
               </fieldset>
               <label class="capture-timeout-desktop">
                 Timeout (sec)
-                <input id="captureTimeout" name="timeout" type="number" min="1" max="30" value="8" />
+                <input id="captureTimeout" name="timeout" type="number" min="1" max="30" value="15" />
               </label>
               <div class="capture-timeout-mobile roller-field">
                 <span>Timeout (sec)</span>
                 <div class="roller-frame"><div id="captureTimeoutRoller" class="roller" role="listbox" tabindex="0" aria-label="Timeout in sec"></div></div>
-                <input id="captureTimeoutMobile" type="hidden" value="8" />
+                <input id="captureTimeoutMobile" type="hidden" value="15" />
               </div>
               <div class="capture-actions">
                 <button id="startCapture" type="button">Sense signal</button>
@@ -331,11 +331,14 @@
             <strong>Swing auto</strong>
             <small>Off uses fixed centre position</small>
           </span>
-          <input id="acSwing" type="checkbox" role="switch" />
+          <input id="acSwing" class="switch-input" type="checkbox" role="switch" />
+          <span class="switch-track" aria-hidden="true"></span>
         </label>
 
         <button id="acPower" class="ac-power-button" type="button">
-          <span class="power-symbol" aria-hidden="true">&#9211;</span>
+          <svg class="power-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 2v10M18.36 5.64a9 9 0 1 1-12.72 0" />
+          </svg>
           <span id="acPowerLabel">Turn on</span>
         </button>
 

@@ -1260,6 +1260,7 @@ fieldset input {
 }
 
 .ac-switch-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1267,9 +1268,10 @@ fieldset input {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   color: var(--text);
+  cursor: pointer;
 }
 
-.ac-switch-row span {
+.ac-switch-row > span:first-child {
   display: grid;
   gap: 2px;
 }
@@ -1277,12 +1279,6 @@ fieldset input {
 .ac-switch-row small {
   color: var(--muted);
   font-weight: 500;
-}
-
-.ac-switch-row input {
-  width: 42px;
-  height: 22px;
-  accent-color: var(--accent);
 }
 
 .ac-power-button {
@@ -1299,7 +1295,14 @@ fieldset input {
 }
 
 .power-symbol {
-  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .ac-last-sent {
